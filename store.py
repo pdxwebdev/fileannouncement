@@ -922,21 +922,46 @@ async def signatures_for_username(config, username: str, limit: int = 20) -> lis
     wanted = (username or "").strip().lstrip("@")
     if not wanted:
         return []
+    name_query = {
+        "transactions.relationship.identity.username": {
+            "$regex": f"^{re.escape(wanted)}$",
+            "$options": "i",
+        }
+    }
     pipeline = [
-        {"$match": {"transactions.relationship.identity.username": wanted}},
+        {"$match": name_query},
         {"$unwind": "$transactions"},
-        {"$match": {"transactions.relationship.identity.username": wanted}},
+        {"$match": name_query},
         {"$limit": int(limit)},
         {"$project": {"sig": "$transactions.relationship.identity.username_signature"}},
     ]
     found = []
+
+    def _add(sig):
+        sig = str(sig or "").strip()
+        if sig and sig not in found:
+            found.append(sig)
+
     try:
         async for doc in _db(config).blocks.aggregate(pipeline):
-            sig = str(doc.get("sig") or "").strip()
-            if sig and sig not in found:
-                found.append(sig)
+            _add(doc.get("sig"))
     except Exception:
-        return found
+        pass
+    try:
+        cursor = _db(config).miner_transactions.find(
+            {
+                "relationship.identity.username": {
+                    "$regex": f"^{re.escape(wanted)}$",
+                    "$options": "i",
+                }
+            },
+            {"relationship.identity.username_signature": 1},
+        ).limit(int(limit))
+        async for doc in cursor:
+            identity = ((doc.get("relationship") or {}).get("identity") or {})
+            _add(identity.get("username_signature"))
+    except Exception:
+        pass
     return found
 
 

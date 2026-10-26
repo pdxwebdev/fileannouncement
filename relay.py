@@ -59,6 +59,17 @@ async def handle_paid_media(rpc, body, stream):
     params = body.get("params") or {}
     transaction_id = str(params.get("transaction_id") or "").strip()
     payment_id = str(params.get("payment_id") or "").strip()
+    peer = getattr(stream, "peer", None)
+    print(
+        "ppv paid_media contacted",
+        "start",
+        params.get("start"),
+        "length",
+        params.get("length"),
+        "from",
+        getattr(peer, "host", None),
+        flush=True,
+    )
     try:
         start = int(params.get("start") or 0)
         length = int(params.get("length") or 0)

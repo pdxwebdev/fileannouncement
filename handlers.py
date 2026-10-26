@@ -20,6 +20,7 @@ from urllib.parse import quote
 
 import tornado.web
 from tornado.iostream import StreamClosedError
+from tornado.log import app_log
 
 from plugins.keyrotation.handlers import KelUnlockHandler
 from plugins.yadapasswordsignin.handlers import redirect_to_signin
@@ -1721,23 +1722,45 @@ async def _purchase_homes(handler, live) -> list:
         seen.add(key)
         homes.append(base)
 
-    username = await _creator_username(handler, live)
-    try:
-        from plugins.passwordrotation.auth_session import password_home_bases
+    def add_peer(peer) -> None:
+        if peer is None:
+            return
+        host = getattr(peer, "host", None) or getattr(peer, "http_host", None) or ""
+        host = str(host).strip()
+        if host in ("", "127.0.0.1", "0.0.0.0", "::", "::1"):
+            return
+        proto = (getattr(peer, "http_protocol", None) or "").lower()
+        port = getattr(peer, "http_port", None)
+        try:
+            port = int(port) if port else 0
+        except (TypeError, ValueError):
+            port = 0
+        if port == 443 or proto == "https":
+            proto = "https"
+            port = port or 443
+        else:
+            proto = proto or "http"
+            port = port or 80
+        if not 1 <= port <= 65535:
+            return
+        add(f"{proto}://{host}:{port}")
 
-        sig = await _creator_username_signature(handler, live)
-        for base in await password_home_bases(sig, handler, tested_limit=6):
-            add(base)
-        from .relay import connected_creator_streams
-
-        for stream in connected_creator_streams(handler.config, username, sig):
-            peer = getattr(stream, "peer", None)
-            host = getattr(peer, "http_host", None) or getattr(peer, "host", None)
-            port = getattr(peer, "http_port", None)
-            if host and port:
-                add(f"http://{host}:{port}")
-    except Exception:
-        pass
+    config = handler.config
+    maps = []
+    client = getattr(config, "nodeClient", None)
+    server = getattr(config, "nodeServer", None)
+    if client is not None:
+        maps.append(getattr(client, "outbound_streams", None) or {})
+    if server is not None:
+        maps.append(getattr(server, "inbound_streams", None) or {})
+    for mapping in maps:
+        if not isinstance(mapping, dict):
+            continue
+        for bucket in mapping.values():
+            if not isinstance(bucket, dict):
+                continue
+            for stream in bucket.values():
+                add_peer(getattr(stream, "peer", None))
     return homes
 
 
@@ -2008,19 +2031,37 @@ class PublicPurchaseHandler(BaseHandler):
 class PublicPurchaseStreamHandler(BaseHandler):
     """GET /file-announcements/api/v1/public/purchase/stream/{transaction_id}"""
 
+    def _ppv_trace(self, reason, **extra) -> str:
+        username = ""
+        try:
+            username = self.config.peer.identity.username or ""
+        except Exception:
+            username = ""
+        parts = [f"ppv-trace {reason}", f"node={username}"]
+        for key, value in extra.items():
+            parts.append(f"{key}={value}")
+        return " ".join(parts)
+
     async def get(self, transaction_id):
         transaction_id = (transaction_id or "").strip()
         access = (self.get_query_argument("access", "") or "").strip()
+        hops_header = self.request.headers.get("X-Yada-Ppv-Hops") or "0"
+        print("ppv stream enter", hops_header, flush=True)
+        app_log.warning(
+            "ppv stream enter hops=%s payment_id=%s",
+            hops_header,
+            bool(self.get_query_argument("payment_id", "")),
+        )
         live = await store.get_live_by_transaction_id(self.config, transaction_id)
         if not live:
             self.set_status(404)
-            return self.finish("file not found")
+            return self.finish(self._ppv_trace("no-live", hops=hops_header))
         price = str(live.get("price") or "").strip()
         pay_to = str(live.get("public_key_hash") or "").strip()
         file_id = str(live.get("file_id") or "").strip()
         if not price or not pay_to:
             self.set_status(404)
-            return self.finish("file not found")
+            return self.finish(self._ppv_trace("no-price", hops=hops_header))
         holds = paidstore.has(self.config, file_id)
         payment_id = (
             (self.get_query_argument("payment_id", "") or "").split("?")[0].strip()
@@ -2081,8 +2122,16 @@ class PublicPurchaseStreamHandler(BaseHandler):
                     payment_id = str(redeemed.get("payment_id") or "")
                 if payment_id and not payment:
                     payment = await purchase.payment_by_id(self.config, payment_id)
+        app_log.warning(
+            "ppv stream decide holds=%s local_access=%s payment_id=%s hops=%s",
+            holds,
+            local_access,
+            bool(payment_id),
+            hops_header,
+        )
         if not holds:
             if not local_access:
+                app_log.warning("ppv stream stop unpaid")
                 self.set_status(402)
                 if purchase.access_token_expired(
                     access
@@ -2092,13 +2141,24 @@ class PublicPurchaseStreamHandler(BaseHandler):
                     return self.finish(purchase.EXPIRED_ERROR)
                 return self.finish("payment required")
             if await _credential_blocked(self, live, file_id):
+                app_log.warning("ppv stream stop credential")
                 return
-            if await self._serve_connected(live, transaction_id, payment_id):
+            served = await self._serve_connected(live, transaction_id, payment_id)
+            app_log.warning("ppv stream serve_connected=%s", served)
+            if served:
                 return
-            direct = self.request.headers.get("X-Yada-Ppv-Direct") == "1"
-            if direct or not payment_id:
+            try:
+                hops = int(self.request.headers.get("X-Yada-Ppv-Hops") or 0)
+            except (TypeError, ValueError):
+                hops = 0
+            if hops >= 3 or not payment_id:
                 self.set_status(404)
-                return self.finish("file not found")
+                return self.finish(
+                    self._ppv_trace(
+                        "before-proxy", hops=hops, payment_id=bool(payment_id)
+                    )
+                )
+            app_log.warning("ppv stream proxy hops=%s", hops)
             return await self._proxy_homes(transaction_id, payment_id)
         if not local_access:
             self.set_status(402)
@@ -2142,7 +2202,7 @@ class PublicPurchaseStreamHandler(BaseHandler):
         fh = paidstore.open_file(self.config, file_id)
         if fh is None:
             self.set_status(404)
-            return self.finish("file not found")
+            return self.finish(self._ppv_trace("open-file-none", file_id=file_id))
         try:
             fh.seek(start)
             remaining = length
@@ -2263,12 +2323,18 @@ class PublicPurchaseStreamHandler(BaseHandler):
             + "?payment_id="
             + quote(payment_id, safe="")
         )
-        headers = {"X-Yada-Ppv-Direct": "1"}
+        if vp:
+            url += "&vp=" + quote(vp, safe="")
+        try:
+            hops = int(self.request.headers.get("X-Yada-Ppv-Hops") or 0) + 1
+        except (TypeError, ValueError):
+            hops = 1
+        headers = {"X-Yada-Ppv-Hops": str(hops)}
         if vp:
             headers["X-Yada-VP"] = vp
         if probe:
             headers["Range"] = "bytes=0-0"
-            request_timeout = 4
+            request_timeout = 15
         else:
             range_header = self.request.headers.get("Range", "")
             if range_header:
@@ -2285,7 +2351,7 @@ class PublicPurchaseStreamHandler(BaseHandler):
             )
         except HTTPClientError as exc:
             response = getattr(exc, "response", None)
-            if getattr(exc, "code", 0) == 403 and response is not None:
+            if response is not None and getattr(exc, "code", 0) in (403, 404):
                 return response
             return None
         except Exception:
@@ -2309,6 +2375,14 @@ class PublicPurchaseStreamHandler(BaseHandler):
                 )
                 for task in done:
                     resp = task.result()
+                    code = None if resp is None else resp.code
+                    app_log.warning(
+                        "ppv stream probe home=%s code=%s",
+                        homes[tasks.index(task)],
+                        code,
+                    )
+                    if resp is not None and resp.body:
+                        self._ppv_last_body = resp.body
                     if resp is None or (resp.code >= 400 and resp.code != 403):
                         continue
                     found = homes[tasks.index(task)]
@@ -2350,11 +2424,15 @@ class PublicPurchaseStreamHandler(BaseHandler):
             home
             for home in await _purchase_homes(self, live)
             if home.rstrip("/") != (cached or "").rstrip("/")
-        ][:8]
+        ]
+        app_log.warning("ppv stream homes=%s", homes)
         home = await self._first_stream_home(homes, transaction_id, payment_id, vp)
         if not home:
             self.set_status(404)
-            return self.finish("file not found")
+            last = getattr(self, "_ppv_last_body", b"") or b""
+            if last:
+                return self.finish(last)
+            return self.finish(self._ppv_trace("no-home", homes=homes))
         resp = await self._fetch_purchase_stream(
             home, transaction_id, payment_id, vp=vp
         )
@@ -2362,8 +2440,13 @@ class PublicPurchaseStreamHandler(BaseHandler):
             self.set_status(403)
             return self.finish("credential required")
         if resp is None or resp.code >= 400:
+            body = b""
+            if resp is not None:
+                body = resp.body or b""
             self.set_status(404)
-            return self.finish("file not found")
+            if body:
+                return self.finish(body)
+            return self.finish(self._ppv_trace("proxy-empty", home=home))
         _stream_home_put(transaction_id, home)
         return self._write_proxied(resp)
 
