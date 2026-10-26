@@ -1029,6 +1029,7 @@
     if (forceScroll) {
       slide.scrollIntoView({ behavior: "auto", block: "start" });
     }
+    syncContentUrl(videos[index]);
   }
 
   function setupObserver() {
@@ -1332,7 +1333,10 @@
         }
         if (!best || bestRatio < 0.55) return;
         const idx = Number(best.target.dataset.index);
-        if (!Number.isNaN(idx)) photoIndex = idx;
+        if (!Number.isNaN(idx)) {
+          photoIndex = idx;
+          syncContentUrl(photos[idx]);
+        }
       },
       { root: photoPane, threshold: [0.55, 0.75, 0.9] }
     );
@@ -1342,15 +1346,32 @@
       const slide = photoPane.querySelector(".slide");
       if (slide) slide.scrollIntoView({ behavior: "auto", block: "start" });
     });
+    syncContentUrl(photos[0]);
   }
 
-  async function loadPhotos(q) {
+  let loadedPhotoPin = null;
+
+  async function loadPhotos(q, pinId) {
+    pinId = pinId || "";
+    loadedPhotoPin = pinId;
     const gen = ++photoGen;
     showStatus("Loading photos…", 0);
     await loadMyBadges();
     try {
       const params = new URLSearchParams({ limit: String(PAGE_SIZE), skip: "0" });
       if (q) params.set("q", q);
+      let pinned = null;
+      if (pinId) {
+        const pinRes = await fetch(
+          `${API_PHOTOS}?transaction_id=${encodeURIComponent(pinId)}`,
+          { credentials: "same-origin" }
+        );
+        if (pinRes.ok) {
+          const pinData = await pinRes.json();
+          pinned = (pinData.results || [])[0] || null;
+        }
+        if (!pinned) showStatus("Photo not found", 4000);
+      }
       const res = await fetch(`${API_PHOTOS}?${params}`, { credentials: "same-origin" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
@@ -1358,8 +1379,14 @@
       if (gen !== photoGen || mediaMode !== "photos") return;
       const seen = new Set();
       photos = [];
+      const incoming = [];
+      if (pinned && !isProfilePhoto(pinned) && !hideAdult(pinned) && photoSrc(pinned)) incoming.push(pinned);
       for (const item of data.results || []) {
+        if (pinId && item.transaction_id === pinId) continue;
         if (isProfilePhoto(item) || hideAdult(item) || !photoSrc(item)) continue;
+        incoming.push(item);
+      }
+      for (const item of incoming) {
         const id = itemKey(item);
         const content = contentKey(item);
         if (seen.has(id) || (content && seen.has(content))) continue;
@@ -1393,23 +1420,30 @@
     hintEl.textContent = photosOn
       ? "Swipe or scroll · gift · report"
       : "Swipe or scroll · gift · live · report · mute";
+    if (viewName === "feed") {
+      const hashPath = (location.hash || "#/").replace(/^#/, "").split("?")[0];
+      const onPhotos =
+        hashPath === "/photos" ||
+        ((hashPath === "/" || hashPath === "") &&
+          new URLSearchParams(location.search).get("media") === "photos");
+      if (onPhotos !== photosOn) {
+        history.replaceState(history.state, "", contentUrl(null, mediaMode));
+      }
+    }
     if (photosOn) {
       emptyEl.hidden = true;
       probeAbort.abort();
       pauseFeed();
-      if (photosLoadedQuery !== query) loadPhotos(query);
-      else photoEmpty.hidden = photos.length > 0;
+      const pin = parseRoute().media === "photos" ? parseRoute().transaction_id || "" : "";
+      if (photosLoadedQuery !== query || loadedPhotoPin !== pin) loadPhotos(query, pin);
+      else {
+        photoEmpty.hidden = photos.length > 0;
+        if (photos.length) syncContentUrl(photos[photoIndex] || photos[0]);
+      }
     } else {
       photoEmpty.hidden = true;
       if (videos.length) activateIndex(activeIndex, false);
-      else if (!loading) loadVideos(query);
-    }
-    if (viewName === "feed") {
-      const next = mediaMode === "photos" ? "#/photos" : "#/";
-      const hash = location.hash || "#/";
-      if (hash !== next && (!hash || hash === "#" || hash === "#/" || hash === "#/photos")) {
-        location.hash = next;
-      }
+      else if (!loading) loadVideos(query, parseRoute().transaction_id || "");
     }
   }
 
@@ -2418,6 +2452,34 @@
     location.hash = `#/profile?${params.toString()}`;
   }
 
+  function searchPin(forPhotos) {
+    const search = new URLSearchParams(location.search);
+    const id = search.get("transaction_id") || "";
+    if (!id) return "";
+    const photos = search.get("media") === "photos";
+    if (forPhotos) return photos ? id : "";
+    return photos ? "" : id;
+  }
+
+  function contentUrl(item, mode) {
+    const photos = mode === "photos";
+    const params = new URLSearchParams();
+    const id = String((item && item.transaction_id) || "").trim();
+    if (id) params.set("transaction_id", id);
+    if (photos) params.set("media", "photos");
+    const query = params.toString();
+    const hash = photos ? "#/photos" : "#/";
+    return `${location.pathname}${query ? `?${query}` : ""}${hash}`;
+  }
+
+  function syncContentUrl(item) {
+    if (viewName !== "feed" || !item || !item.transaction_id) return;
+    const next = contentUrl(item, mediaMode);
+    const current = `${location.pathname}${location.search}${location.hash || ""}`;
+    if (current === next) return;
+    history.replaceState(history.state, "", next);
+  }
+
   function parseRoute() {
     const raw = (location.hash || "#/").replace(/^#/, "");
     const path = raw.split("?")[0];
@@ -2466,7 +2528,7 @@
       return { view: "profile", username, owner: "", transaction_id: "" };
     }
     if (path === "/photos") {
-      return { view: "feed", media: "photos", transaction_id };
+      return { view: "feed", media: "photos", transaction_id: transaction_id || searchPin(true) };
     }
     if (path === "/profile" && transaction_id && !owner) {
       return { view: "feed", media: "videos", transaction_id };
@@ -2477,7 +2539,7 @@
     return {
       view: "feed",
       media: "videos",
-      transaction_id: path === "/" || path === "" ? transaction_id : "",
+      transaction_id: path === "/" || path === "" ? transaction_id || searchPin(false) : "",
     };
   }
 
@@ -3222,7 +3284,8 @@
         pauseFeed();
         emptyEl.hidden = true;
         photoEmpty.hidden = photos.length > 0;
-        if (photosLoadedQuery !== query) loadPhotos(query);
+        if (photosLoadedQuery !== query || loadedPhotoPin !== pin) loadPhotos(query, pin);
+        else if (photos.length) syncContentUrl(photos[photoIndex] || photos[0]);
         return;
       }
       if (loadedPin !== pin) {
@@ -3806,24 +3869,34 @@
   tabPhotos.addEventListener("click", () => setMedia("photos"));
   navFyp.addEventListener("click", () => {
     const hash = location.hash || "";
-    if (!hash || hash === "#" || hash === "#/" || hash === "#/photos") {
+    const bare =
+      !location.search &&
+      (!hash || hash === "#" || hash === "#/" || hash === "#/photos");
+    if (bare) {
       closePlayer();
       syncRoute();
       return;
     }
-    location.hash = mediaMode === "photos" ? "#/photos" : "#/";
+    history.pushState(history.state, "", contentUrl(null, mediaMode));
+    syncRoute();
   });
   navProfile.addEventListener("click", openOwnProfile);
   window.addEventListener("pagehide", abortComposeUpload);
-  window.addEventListener("hashchange", () => {
+  function onRouteChange() {
     if (armBadgeDetailBack) {
       badgeDetailFromList = true;
       armBadgeDetailBack = false;
     } else {
       badgeDetailFromList = false;
     }
+    if (parseRoute().view !== "feed" && location.search) {
+      history.replaceState(history.state, "", location.pathname + location.hash);
+    }
     syncRoute();
-  });
+  }
+
+  window.addEventListener("hashchange", onRouteChange);
+  window.addEventListener("popstate", onRouteChange);
 
   setTimeout(() => hintEl.classList.add("fade"), 4500);
 
