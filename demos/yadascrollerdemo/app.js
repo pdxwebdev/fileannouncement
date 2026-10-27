@@ -3261,8 +3261,20 @@
         : `<span class="ph">${item.stream_url ? "▶" : "▣"}</span>`;
       tile.innerHTML = `${still}${priceChipHtml(item)}${credentialChipHtml(item)}<span class="cap">${escapeHtml(label)}</span>`;
       tile.addEventListener("click", () => {
-        if (profileMedia === "photos") openPhoto(items[index]);
-        else openPlayer(items[index]);
+        const item = items[index];
+        if (!item || !item.transaction_id) {
+          if (profileMedia === "photos") openPhoto(item);
+          else openPlayer(item);
+          return;
+        }
+        const next = contentUrl(item, profileMedia);
+        const current = `${location.pathname}${location.search}${location.hash || ""}`;
+        if (current === next) {
+          syncRoute();
+          return;
+        }
+        history.pushState(history.state, "", next);
+        syncRoute();
       });
       profileGrid.appendChild(tile);
     });
