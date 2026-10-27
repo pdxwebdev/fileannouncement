@@ -67,6 +67,10 @@
         <div class="profile-head">
           <div class="avatar-lg" id="profile-avatar" aria-hidden="true"></div>
           <h1 id="profile-name">Profile</h1>
+          <p class="presence" id="profile-presence" hidden>
+            <span class="presence-dot" aria-hidden="true"></span>
+            <span id="profile-presence-label"></span>
+          </p>
           <p class="profile-sub" id="profile-sub" hidden></p>
           <div class="stats">
             <div><strong id="stat-gifts">—</strong><span>Gifts</span></div>
@@ -132,6 +136,7 @@
       <video id="player-video" playsinline webkit-playsinline loop></video>
       <img id="player-photo" alt="" hidden />
       <div class="spinner" id="player-spinner" hidden></div>
+      <div class="err" id="player-offline" hidden></div>
       <div class="player-caption" id="player-caption"></div>
       <div id="player-gate" class="player-gate" hidden>
         <img id="player-gate-bg" class="player-gate-bg" alt="" hidden />

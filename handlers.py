@@ -1214,7 +1214,26 @@ class PublicProfileHandler(BaseHandler):
         profile = await _profile_payload(
             self.config, inception, bool(me and me == inception)
         )
+        signature = await store.username_signature_for_inception(self.config, inception)
+        profile["online"] = await _creator_reachable(
+            self, profile.get("username") or "", signature or ""
+        )
         return self.render_as_json({"status": True, "profile": profile})
+
+
+class PublicOnlineHandler(BaseHandler):
+    """GET /file-announcements/api/v1/public/online — creator socket via the stream path."""
+
+    async def get(self):
+        username = (self.get_query_argument("username", "") or "").strip()
+        signature = (self.get_query_argument("signature", "") or "").strip()
+        inception = await _resolve_public_inception(self.config, username, "", "")
+        if inception and not signature:
+            signature = await store.username_signature_for_inception(
+                self.config, inception
+            )
+        online = await _creator_reachable(self, username, signature or "")
+        return self.render_as_json({"status": True, "online": online})
 
 
 class PublicBadgesHandler(BaseHandler):
@@ -1764,6 +1783,66 @@ async def _purchase_homes(handler, live) -> list:
     return homes
 
 
+async def _creator_reachable(handler, username: str, signature: str = "") -> bool:
+    from tornado.httpclient import AsyncHTTPClient, HTTPClientError, HTTPRequest
+
+    from . import relay
+
+    username = (username or "").strip()
+    signature = (signature or "").strip()
+    if not username and not signature:
+        return False
+    try:
+        hops = int(handler.request.headers.get("X-Yada-Ppv-Hops") or 0)
+    except (TypeError, ValueError):
+        hops = 0
+    if relay.connected_creator_streams(handler.config, username, signature):
+        return True
+    if hops >= 3:
+        return False
+    homes = await _purchase_homes(handler, None)
+
+    async def probe(home: str) -> bool:
+        url = (
+            home.rstrip("/")
+            + "/file-announcements/api/v1/public/online?username="
+            + quote(username, safe="")
+        )
+        if signature:
+            url += "&signature=" + quote(signature, safe="")
+        try:
+            resp = await AsyncHTTPClient().fetch(
+                HTTPRequest(
+                    url,
+                    headers={"X-Yada-Ppv-Hops": str(hops + 1)},
+                    connect_timeout=2,
+                    request_timeout=6,
+                )
+            )
+        except HTTPClientError as exc:
+            resp = getattr(exc, "response", None)
+        except Exception:
+            return False
+        if resp is None or resp.code >= 400 or not resp.body:
+            return False
+        try:
+            body = json.loads(resp.body.decode() or "{}")
+        except Exception:
+            return False
+        return bool(body.get("online"))
+
+    tasks = [asyncio.create_task(probe(home)) for home in homes]
+    try:
+        for task in asyncio.as_completed(tasks):
+            if await task:
+                return True
+        return False
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+
+
 def _paid_body(handler, live, redeemed) -> dict:
     return {
         "status": True,
@@ -2041,6 +2120,13 @@ class PublicPurchaseStreamHandler(BaseHandler):
         for key, value in extra.items():
             parts.append(f"{key}={value}")
         return " ".join(parts)
+
+    def _ppv_note(self, home, reason) -> None:
+        misses = getattr(self, "_ppv_misses", None)
+        if misses is None:
+            misses = []
+            self._ppv_misses = misses
+        misses.append(f"{home} {reason}")
 
     async def get(self, transaction_id):
         transaction_id = (transaction_id or "").strip()
@@ -2351,10 +2437,12 @@ class PublicPurchaseStreamHandler(BaseHandler):
             )
         except HTTPClientError as exc:
             response = getattr(exc, "response", None)
-            if response is not None and getattr(exc, "code", 0) in (403, 404):
+            if response is not None and response.body:
                 return response
+            self._ppv_note(home, f"http {getattr(exc, 'code', 0)}")
             return None
-        except Exception:
+        except Exception as exc:
+            self._ppv_note(home, type(exc).__name__)
             return None
 
     async def _first_stream_home(self, homes, transaction_id, payment_id, vp=""):
@@ -2432,7 +2520,13 @@ class PublicPurchaseStreamHandler(BaseHandler):
             last = getattr(self, "_ppv_last_body", b"") or b""
             if last:
                 return self.finish(last)
-            return self.finish(self._ppv_trace("no-home", homes=homes))
+            return self.finish(
+                self._ppv_trace(
+                    "no-home",
+                    homes=homes,
+                    misses=getattr(self, "_ppv_misses", []),
+                )
+            )
         resp = await self._fetch_purchase_stream(
             home, transaction_id, payment_id, vp=vp
         )
@@ -2541,6 +2635,7 @@ HANDLERS = [
     (r"/file-announcements/api/v1/public/videos", PublicVideoListHandler),
     (r"/file-announcements/api/v1/public/photos", PublicPhotoListHandler),
     (r"/file-announcements/api/v1/public/profile", PublicProfileHandler),
+    (r"/file-announcements/api/v1/public/online", PublicOnlineHandler),
     (r"/file-announcements/api/v1/public/badges", PublicBadgesHandler),
     (r"/file-announcements/api/v1/public/me", PublicMeHandler),
     (

@@ -678,6 +678,31 @@ html.landing .site-menu-btn {
   font-weight: 800;
 }
 
+.presence {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.presence-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #8a8a8a;
+}
+
+.presence.is-online {
+  color: #3dd68c;
+}
+
+.presence.is-online .presence-dot {
+  background: #3dd68c;
+}
+
 .profile-sub {
   margin: 6px 0 0;
   color: var(--muted);
@@ -1240,6 +1265,25 @@ html.landing .site-menu-btn {
 }
 
 .player .spinner[hidden] {
+  display: none !important;
+}
+
+.player .err {
+  position: absolute;
+  inset: 0;
+  bottom: calc(var(--nav-h) + var(--safe-bottom));
+  z-index: 4;
+  display: grid;
+  place-content: center;
+  padding: 28px 24px;
+  text-align: center;
+  background: rgba(0, 0, 0, 0.82);
+  color: #fff;
+  font-size: 16px;
+  line-height: 1.45;
+}
+
+.player .err[hidden] {
   display: none !important;
 }
 

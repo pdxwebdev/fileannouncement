@@ -51,6 +51,8 @@
   const profileTopTitle = document.getElementById("profile-top-title");
   const profileAvatar = document.getElementById("profile-avatar");
   const profileName = document.getElementById("profile-name");
+  const profilePresence = document.getElementById("profile-presence");
+  const profilePresenceLabel = document.getElementById("profile-presence-label");
   const profileSub = document.getElementById("profile-sub");
   const profileActions = document.getElementById("profile-actions");
   const profileGrid = document.getElementById("profile-grid");
@@ -99,6 +101,7 @@
   const composeSubmit = document.getElementById("compose-submit");
   const composeSignin = document.getElementById("compose-signin");
   const playerSpinner = document.getElementById("player-spinner");
+  const playerOffline = document.getElementById("player-offline");
   const playerCaption = document.getElementById("player-caption");
   const playerLive = document.getElementById("player-live");
   const playerGate = document.getElementById("player-gate");
@@ -754,6 +757,61 @@
     } catch (_) {}
   }
 
+  const OFFLINE_COPY = "The content creator is offline";
+
+  function showSlideOffline(slide) {
+    if (!slide || !slide.isConnected) return;
+    slide.classList.add("error", "ready");
+    let note = slide.querySelector(":scope > .err");
+    if (!note) {
+      note = document.createElement("div");
+      note.className = "err";
+      slide.appendChild(note);
+    }
+    note.textContent = OFFLINE_COPY;
+  }
+
+  async function mediaStatus(url) {
+    if (!url) return 0;
+    try {
+      const res = await fetch(url, {
+        method: "GET",
+        headers: { Range: "bytes=0-0" },
+        credentials: "same-origin",
+      });
+      try {
+        await res.arrayBuffer();
+      } catch (_) {}
+      return res.status;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  function notePaidOffline(item, url, onOffline, onOther) {
+    if (!itemPrice(item) && !String(url || "").includes("/purchase/stream/")) {
+      if (onOther) onOther();
+      return;
+    }
+    mediaStatus(url).then((status) => {
+      if (status === 404) onOffline();
+      else if (onOther) onOther();
+    });
+  }
+
+  function hideCreatorOffline() {
+    if (!playerOffline) return;
+    playerOffline.hidden = true;
+    playerOffline.textContent = "";
+  }
+
+  function showCreatorOffline() {
+    if (!playerOffline) return;
+    playerSpinner.hidden = true;
+    playerOffline.hidden = false;
+    playerOffline.textContent = OFFLINE_COPY;
+  }
+
   function dropVideo(key) {
     if (!key || dropped.has(key)) return;
     const index = videos.findIndex((v) => itemKey(v) === key);
@@ -895,7 +953,13 @@
           video.dataset.unloading = "";
           return;
         }
-        dropVideo(slide.dataset.key);
+        const url = video.currentSrc || video.getAttribute("src") || video.getAttribute("data-src");
+        notePaidOffline(
+          item,
+          url,
+          () => showSlideOffline(slide),
+          () => dropVideo(slide.dataset.key)
+        );
       },
       true
     );
@@ -986,7 +1050,15 @@
       if (!slide.isConnected || viewName !== "feed" || mediaMode === "photos" || !playerEl.hidden) return;
       video.play().catch((err) => {
         if (err && err.name === "NotAllowedError") return;
-        if (video.error) dropVideo(slide.dataset.key);
+        if (video.error) {
+          const url = video.currentSrc || video.getAttribute("src") || video.getAttribute("data-src");
+          notePaidOffline(
+            videos[index],
+            url,
+            () => showSlideOffline(slide),
+            () => dropVideo(slide.dataset.key)
+          );
+        }
       });
     };
     if (video.readyState >= 2) play();
@@ -994,7 +1066,13 @@
       video.addEventListener("loadeddata", play, { once: true });
       setTimeout(() => {
         if (slide.isConnected && video.error && video.dataset.unloading !== "1") {
-          dropVideo(slide.dataset.key);
+          const url = video.currentSrc || video.getAttribute("src") || video.getAttribute("data-src");
+          notePaidOffline(
+            videos[index],
+            url,
+            () => showSlideOffline(slide),
+            () => dropVideo(slide.dataset.key)
+          );
         }
       }, 8000);
     }
@@ -1075,6 +1153,11 @@
         try {
           await res.arrayBuffer();
         } catch (_) {}
+        if (res.status === 404 && (itemPrice(item) || String(url).includes("/purchase/stream/"))) {
+          const slide = feed.querySelector(`[data-key="${CSS.escape(key)}"]`);
+          showSlideOffline(slide);
+          return;
+        }
         dropVideo(key);
         return;
       }
@@ -2781,6 +2864,7 @@
     playerEl.hidden = true;
     appEl.classList.remove("player-open");
     playerSpinner.hidden = true;
+    hideCreatorOffline();
     playerCaption.textContent = "";
     playerLive.hidden = true;
     railReport.hidden = false;
@@ -2820,6 +2904,7 @@
     playerVideo.hidden = false;
     playerVideo.loop = true;
     playerCaption.textContent = item.title || item.filename || "";
+    hideCreatorOffline();
     playerSpinner.hidden = false;
     playerEl.hidden = false;
     appEl.classList.add("player-open");
@@ -3079,8 +3164,19 @@
     }
   }
 
-  playerVideo.addEventListener("playing", hidePlayerSpinner);
-  playerVideo.addEventListener("error", hidePlayerSpinner);
+  playerVideo.addEventListener("playing", () => {
+    hidePlayerSpinner();
+    hideCreatorOffline();
+  });
+  playerVideo.addEventListener("error", () => {
+    hidePlayerSpinner();
+    const item = playerItem;
+    const url = playerVideo.currentSrc || playerVideo.getAttribute("src") || "";
+    notePaidOffline(item, url, () => {
+      if (playerEl.hidden || playerItem !== item) return;
+      showCreatorOffline();
+    });
+  });
 
   function formatCount(value) {
     if (value === null || value === undefined || value === "") return "—";
@@ -3180,6 +3276,14 @@
     const name = displayName(profile);
     profileTopTitle.textContent = profile && profile.username ? profile.username : "Profile";
     profileName.textContent = name;
+    if (profile && profile.username) {
+      profilePresence.hidden = false;
+      profilePresence.classList.toggle("is-online", !!profile.online);
+      profilePresenceLabel.textContent = profile.online ? "Online" : "Offline";
+    } else {
+      profilePresence.hidden = true;
+      profilePresence.classList.remove("is-online");
+    }
     const circle = ((profile && profile.photos) || []).find(
       (item) => isProfilePhoto(item) && photoSrc(item)
     );
@@ -3210,6 +3314,8 @@
     paintProfileTabs();
     profileTopTitle.textContent = "Profile";
     profileName.textContent = "Profile";
+    profilePresence.hidden = true;
+    profilePresence.classList.remove("is-online");
     paintAvatar(profileAvatar, "");
     applyProfileLive(null);
     profileSub.hidden = false;
