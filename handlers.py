@@ -1182,6 +1182,7 @@ async def _profile_payload(config, inception: str, is_me: bool) -> dict:
         "identity_announcement": identity_txn_id,
         "videos": videos,
         "photos": photos,
+        "username_signature": signature,
     }
 
 
@@ -1214,9 +1215,9 @@ class PublicProfileHandler(BaseHandler):
         profile = await _profile_payload(
             self.config, inception, bool(me and me == inception)
         )
-        signature = await store.username_signature_for_inception(self.config, inception)
+        signature = profile.pop("username_signature", "") or ""
         profile["online"] = await _creator_reachable(
-            self, profile.get("username") or "", signature or ""
+            self, profile.get("username") or "", signature
         )
         return self.render_as_json({"status": True, "profile": profile})
 
@@ -1227,11 +1228,12 @@ class PublicOnlineHandler(BaseHandler):
     async def get(self):
         username = (self.get_query_argument("username", "") or "").strip()
         signature = (self.get_query_argument("signature", "") or "").strip()
-        inception = await _resolve_public_inception(self.config, username, "", "")
-        if inception and not signature:
-            signature = await store.username_signature_for_inception(
-                self.config, inception
-            )
+        if not signature:
+            inception = await _resolve_public_inception(self.config, username, "", "")
+            if inception:
+                signature = await store.username_signature_for_inception(
+                    self.config, inception
+                )
         online = await _creator_reachable(self, username, signature or "")
         return self.render_as_json({"status": True, "online": online})
 
@@ -1295,6 +1297,7 @@ class PublicMeHandler(BaseHandler):
         profile = None
         if inception:
             profile = await _profile_payload(self.config, inception, True)
+            profile.pop("username_signature", None)
         username = _operator_username(self.config, profile)
         return self.render_as_json(
             {
