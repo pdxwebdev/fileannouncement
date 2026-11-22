@@ -315,9 +315,18 @@ async def _find_confirming_for(config, unconfirmed_txn) -> Optional[object]:
 
 
 async def _broadcast_confirming_only(config, confirming: Transaction):
-    await config.mongo.async_db.miner_transactions.replace_one(
-        {"id": confirming.transaction_signature}, confirming.to_dict(), upsert=True
-    )
+    from pymongo.errors import DuplicateKeyError
+
+    try:
+        await config.mongo.async_db.miner_transactions.replace_one(
+            {"id": confirming.transaction_signature}, confirming.to_dict(), upsert=True
+        )
+    except DuplicateKeyError:
+        app_log.warning(
+            "confirming KEL slot already occupied, not storing %s",
+            confirming.transaction_signature,
+        )
+        return
     peer = getattr(config, "peer", None)
     node_shared = getattr(config, "nodeShared", None)
     node_client = getattr(config, "nodeClient", None)
@@ -600,6 +609,30 @@ async def _raise_if_upload_aborted(cancelled):
         raise FileAnnouncementServiceError("upload aborted")
 
 
+async def upload_blob(
+    config,
+    content: bytes,
+    filename: str = "",
+    mime_type: str = "",
+):
+    """Upload a public file with this node's Sia key. Does not announce."""
+    if not content:
+        raise FileAnnouncementServiceError("file content is required")
+    backend, name, _settings = await _backend_from_settings(config, "")
+    uploaded = await backend.upload(
+        content,
+        filename=filename or "blob",
+        mime_type=mime_type or "application/octet-stream",
+        metadata={"opaque": True},
+    )
+    return {
+        "backend": name,
+        "file_id": uploaded["file_id"],
+        "share_url": uploaded.get("share_url") or "",
+        "size": uploaded.get("size", len(content)),
+    }
+
+
 async def create_file(
     config,
     title: str,
@@ -620,6 +653,9 @@ async def create_file(
     required_credentials=None,
     on_progress=None,
     cancelled=None,
+    share_url: str = "",
+    thumbnail_file_id: str = "",
+    thumbnail_share_url: str = "",
 ):
     price = normalize_price(price)
     grant_seconds = normalize_grant_seconds(grant_seconds)
@@ -631,6 +667,11 @@ async def create_file(
     record_id = store.new_record_id()
     uploaded = None
     content_hash = hashlib.sha256(content).hexdigest() if content else ""
+    if not content and size not in (None, ""):
+        try:
+            size = int(size)
+        except (TypeError, ValueError):
+            size = 0
     known_size = len(content) if content else size
     try:
         await _raise_if_upload_aborted(cancelled)
@@ -689,8 +730,10 @@ async def create_file(
                 "either file content or an existing file_id is required"
             )
         else:
-            share_url = ""
+            share_url = str(share_url or "").strip()
         await _raise_if_upload_aborted(cancelled)
+        client_thumb_id = str(thumbnail_file_id or "").strip()
+        client_thumb_share = str(thumbnail_share_url or "").strip()
         thumbnail_file_id = ""
         thumbnail_share_url = ""
         if thumbnail:
@@ -703,6 +746,9 @@ async def create_file(
             )
             thumbnail_file_id = thumb["file_id"]
             thumbnail_share_url = thumb.get("share_url") or ""
+        elif client_thumb_id:
+            thumbnail_file_id = client_thumb_id
+            thumbnail_share_url = client_thumb_share
         await _raise_if_upload_aborted(cancelled)
         _emit_progress(on_progress, {"phase": "announcing"})
         if not price and not share_url and hasattr(backend, "share"):

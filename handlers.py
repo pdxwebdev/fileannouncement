@@ -35,6 +35,7 @@ from .service import (
     announce_content_takedown,
     assert_live,
     create_file,
+    upload_blob,
     delete_file,
     download_file,
     forget_live,
@@ -456,6 +457,10 @@ class FileListHandler(BaseFileAnnouncementHandler):
             required_claim = self.get_body_argument("required_claim", "")
             required_issuer = self.get_body_argument("required_issuer", "")
             required_credentials = self.get_body_argument("required_credentials", "")
+            share_url = self.get_body_argument("share_url", "")
+            thumbnail_file_id = self.get_body_argument("thumbnail_file_id", "")
+            thumbnail_share_url = self.get_body_argument("thumbnail_share_url", "")
+            size = self.get_body_argument("size", "")
             thumbnail = None
             if self.request.files.get("thumbnail"):
                 thumbnail = self.request.files["thumbnail"][0].get("body") or None
@@ -480,6 +485,10 @@ class FileListHandler(BaseFileAnnouncementHandler):
             required_claim = data.get("required_claim") or ""
             required_issuer = data.get("required_issuer") or ""
             required_credentials = data.get("required_credentials")
+            share_url = data.get("share_url") or ""
+            thumbnail_file_id = data.get("thumbnail_file_id") or ""
+            thumbnail_share_url = data.get("thumbnail_share_url") or ""
+            size = data.get("size") or ""
             thumbnail = None
             raw = data.get("content_b64") or ""
             if raw:
@@ -537,6 +546,10 @@ class FileListHandler(BaseFileAnnouncementHandler):
                 price=price,
                 grant_seconds=grant_seconds,
                 required_credentials=resolved_gates,
+                size=size or None,
+                share_url=share_url,
+                thumbnail_file_id=thumbnail_file_id,
+                thumbnail_share_url=thumbnail_share_url,
                 on_progress=(
                     (lambda event, uid=upload_id: progress.apply(uid, event))
                     if tracked
@@ -2608,6 +2621,36 @@ class PublicPurchaseStreamHandler(BaseHandler):
         return True
 
 
+class PublicBlobHandler(BaseHandler):
+    """POST a public file. This node uploads it and does not announce it."""
+
+    def _blob_error(self, status, message):
+        self.set_status(status)
+        return self.render_as_json({"status": False, "error": message})
+
+    async def post(self):
+        content = self.request.body or b""
+        filename = (self.request.headers.get("X-Filename") or "blob").strip()
+        filename = os.path.basename(filename.replace("\\", "/")) or "blob"
+        mime = (self.request.headers.get("X-Mime") or "application/octet-stream").strip()
+        if not content:
+            return self._blob_error(400, "file content is required")
+        try:
+            result = await upload_blob(
+                self.config,
+                content,
+                filename=filename,
+                mime_type=mime,
+            )
+        except FileAnnouncementServiceError as exc:
+            return self._blob_error(400, str(exc))
+        except Exception:
+            app_log.exception("blob upload failed")
+            return self._blob_error(400, "upload failed")
+        self.set_status(201)
+        return self.render_as_json({"status": True, "result": result})
+
+
 HANDLERS = [
     (r"/file-announcements", FileAnnouncementDashboardHandler),
     (r"/file-announcements/api/v1/unlock", FileAnnouncementUnlockHandler),
@@ -2646,6 +2689,7 @@ HANDLERS = [
         PublicTakedownReasonsHandler,
     ),
     (r"/file-announcements/api/v1/public/takedown", PublicTakedownHandler),
+    (r"/file-announcements/api/v1/public/blob", PublicBlobHandler),
     (
         r"/file-announcements/api/v1/public/stream/([^/]+)/([^/]+)",
         PublicStreamHandler,
