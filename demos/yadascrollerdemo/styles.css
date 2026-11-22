@@ -1605,6 +1605,9 @@ html.landing .site-menu-btn {
   transform: scale(0.96);
 }
 
+#onramp-element {
+  min-height: 420px;
+}
 .gift-dlg {
   border: 0;
   padding: 0;
@@ -1655,7 +1658,6 @@ a.pill {
 html.landing .media-tabs,
 html.landing #refresh,
 html.landing .hint,
-html.landing #rail-report,
 html.landing #nav-fyp,
 html.landing #nav-profile {
   display: none;

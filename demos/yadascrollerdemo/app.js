@@ -27,6 +27,14 @@
     { id: "diamond", name: "Diamond", emoji: "💎", price: 500 },
   ];
 
+  function onrampUrl() {
+    return "/crypto-onramp?return_url=" + encodeURIComponent(location.origin + "/");
+  }
+
+  for (const link of document.querySelectorAll('a[href="/crypto-onramp"]')) {
+    link.href = onrampUrl();
+  }
+
   const feed = document.getElementById("feed");
   const photoPane = document.getElementById("photo-pane");
   const photoEmpty = document.getElementById("photo-empty");
@@ -74,6 +82,8 @@
   const editUpload = document.getElementById("edit-upload");
   const publishEl = document.getElementById("publish");
   const publishBack = document.getElementById("publish-back");
+  const fundEl = document.getElementById("fund");
+  const fundBack = document.getElementById("fund-back");
   const extStatus = document.getElementById("ext-status");
   const signinMsg = document.getElementById("signin-msg");
   const signinTrack = document.getElementById("signin-track");
@@ -122,6 +132,8 @@
   const buyClose = document.getElementById("buy-close");
   const buyCheck = document.getElementById("buy-check");
   const buyNode = document.getElementById("buy-node");
+  const buyOnramp = document.getElementById("buy-onramp");
+  const onrampElement = document.getElementById("onramp-element");
   let buyItem = null;
   const railReport = document.getElementById("rail-report");
   const giftDlg = document.getElementById("gift-dlg");
@@ -1782,7 +1794,7 @@
     composeFields.querySelectorAll("input, textarea, select, button").forEach((el) => {
       el.disabled = off;
     });
-    composeSubmit.textContent = composeBusy ? "Uploading…" : "Upload & announce";
+    composeSubmit.textContent = composeBusy ? "Uploading…" : "Upload";
     composeForm.setAttribute("aria-busy", composeBusy ? "true" : "false");
   }
 
@@ -1871,25 +1883,152 @@
   }
 
   async function openCompose() {
-    const gen = ++composeGen;
     applyComposeType(parseRoute());
     if (!composeBusy) setComposeMsg("");
-    try {
-      const res = await fetch(API_ME, { credentials: "same-origin" });
-      const data = await res.json().catch(() => ({}));
-      if (gen !== composeGen || parseRoute().view !== "upload") return;
-      if (data.authenticated !== true) {
-        setComposeLocked(true);
-        setComposeMsg("Sign in to upload photos and videos.");
-        return;
-      }
-      setComposeLocked(false);
-      await loadComposeBackends();
-    } catch (err) {
-      if (gen !== composeGen || parseRoute().view !== "upload") return;
-      if (err.status === 401) setComposeLocked(true);
-      setComposeMsg(err.message || "Could not open upload", "err");
+    if (!clientIdentity()) {
+      setComposeLocked(true);
+      setComposeMsg("Sign in to upload photos and videos.");
+      return;
     }
+    setComposeLocked(false);
+    if (!composeBackend.options.length) {
+      composeBackend.innerHTML = '<option value="sia">Sia</option>';
+    }
+    composeBackend.value = "sia";
+  }
+
+  async function absorbStorageKey() {
+    const params = new URLSearchParams(location.search);
+    if (params.get("action") !== "storage" || params.get("ok") !== "1") return;
+    const box = params.get("siaBox") || "";
+    history.replaceState({}, "", location.pathname + location.hash);
+    if (!box || !window.YadaSia) return;
+    try {
+      YadaSia.storeKey(await YadaSia.openBox(box));
+    } catch (_) {}
+  }
+
+  function localHandoffOk() {
+    if (location.protocol === "https:") return true;
+    const host = location.hostname;
+    return (
+      location.protocol === "http:" &&
+      (host === "localhost" || host === "127.0.0.1" || host === "[::1]")
+    );
+  }
+
+  function storeWithPassword(file, thumb, meta) {
+    return new Promise(function (resolve, reject) {
+      const requestId = "up_" + Date.now();
+      const timer = setTimeout(function () {
+        cleanup();
+        reject(new Error("Yada Password did not finish the upload"));
+      }, 20 * 60 * 1000);
+      function onMsg(ev) {
+        if (!ev.data || ev.data.requestId !== requestId) return;
+        if (ev.data.type === "YADA_PASSWORD_PROGRESS" && ev.data.message) {
+          showComposeProgress(null, String(ev.data.message));
+          return;
+        }
+        if (ev.data.type !== "YADA_PASSWORD_STORE_RESULT") return;
+        cleanup();
+        if (!ev.data.ok) reject(new Error(ev.data.message || "upload failed"));
+        else resolve(ev.data);
+      }
+      function cleanup() {
+        clearTimeout(timer);
+        window.removeEventListener("message", onMsg);
+      }
+      window.addEventListener("message", onMsg);
+      const fileUrl = URL.createObjectURL(file);
+      const thumbUrl = thumb ? URL.createObjectURL(thumb) : "";
+      window.postMessage({
+        type: "YADA_PASSWORD_STORE",
+        requestId: requestId,
+        title: meta.title,
+        description: meta.description || "",
+        filename: file.name || "",
+        mime: file.type || "",
+        size: file.size || 0,
+        kind: meta.kind || "",
+        fileUrl: fileUrl,
+        thumbUrl: thumbUrl,
+      }, "*");
+    });
+  }
+
+  function requestBaseAddress(reason) {
+    if (!localHandoffOk()) {
+      throw new Error("Base address handoff requires https");
+    }
+    try {
+      sessionStorage.setItem("yada-base-reason", reason || "buy");
+    } catch (_) {}
+    const q = new URLSearchParams({
+      action: "base",
+      site: location.origin,
+      callback: location.origin + location.pathname,
+      nonce: "n_" + Date.now(),
+    });
+    location.href = "yadapass://auth?" + q.toString();
+  }
+
+  function clientIdentity() {
+    let username = "";
+    let address = "";
+    let identity = "";
+    try {
+      username = (localStorage.getItem("yada-client-username") || "").replace(/^@/, "");
+      address = localStorage.getItem("yada-onramp-address") || "";
+      identity = localStorage.getItem("yada-client-identity") || "";
+    } catch (_) {}
+    if (!username || !/^0x[0-9a-fA-F]{40}$/.test(address)) return null;
+    return { username, address, identity };
+  }
+
+  function storeClientIdentity(params, address) {
+    localStorage.setItem("yada-onramp-address", address);
+    const username = (params.get("username") || "").trim().replace(/^@/, "");
+    const identity = (params.get("identity") || "").trim();
+    if (username) localStorage.setItem("yada-client-username", username);
+    if (identity) localStorage.setItem("yada-client-identity", identity);
+    return username;
+  }
+
+  async function absorbBaseAddress() {
+    const params = new URLSearchParams(location.search);
+    if (params.get("action") !== "base" || params.get("ok") !== "1") return;
+    const address = params.get("baseAddress") || "";
+    let reason = "";
+    try {
+      reason = sessionStorage.getItem("yada-base-reason") || "";
+      sessionStorage.removeItem("yada-base-reason");
+    } catch (_) {}
+    history.replaceState({}, "", location.pathname + location.hash);
+    if (!/^0x[0-9a-fA-F]{40}$/.test(address)) return;
+    const username = storeClientIdentity(params, address);
+    if (reason === "signin") {
+      setSigninMsg(username ? "Signed in as @" + username : "Signed in", "ok");
+      if (signinUsername && username) signinUsername.value = username;
+      return;
+    }
+    if (buyDlg && typeof buyDlg.showModal === "function") buyDlg.showModal();
+    await mountOnramp(address);
+  }
+
+  async function notePendingUnwrap() {
+    const client = clientIdentity();
+    if (!client) return;
+    let data = {};
+    try {
+      const res = await fetch("/crypto-onramp/unwrap-done?wallet=" + encodeURIComponent(client.address));
+      data = await res.json();
+    } catch (_) {
+      return;
+    }
+    if (!data.unwrap) return;
+    const pay = data.unwrap.yadacoin_address || "your Yadacoin address";
+    showStatus("Unwrap pending. Native YDA is sent manually to " + pay + ".", 0);
   }
 
   async function submitCompose(e) {
@@ -1898,6 +2037,7 @@
     const fd = new FormData(composeForm);
     const file = fd.get("file");
     const hasFile = !!(file && file.name && file.size);
+    const priced = String(fd.get("price") || "").trim();
     const image = hasFile && isImageFile(file);
     const video = hasFile && isVideoFile(file);
     const uploadId = newUploadId();
@@ -1908,43 +2048,66 @@
     setComposeMsg("");
     let announced = false;
     try {
+      let packed = null;
+      let thumb = null;
       if (image) {
         showComposeProgress(0, "Resizing photo…");
-        const packed = await compressPhoto(file);
+        packed = await compressPhoto(file);
         fd.set("file", packed.file, packed.file.name);
         fd.set("thumbnail", packed.thumb, "thumbnail.jpg");
       } else if (video) {
         showComposeProgress(0, "Capturing thumbnail…");
-        const thumb = await captureVideoThumbnail(file);
+        thumb = await captureVideoThumbnail(file);
         if (thumb) fd.set("thumbnail", thumb, "thumbnail.jpg");
       }
       if (req !== composeReq) throw abortError();
-      showComposeProgress(hasFile ? 0 : null, hasFile ? "Sending to node 0%" : "Announcing…");
-      const data = await postForm(API_FILES, fd, (loaded, total) => {
-        if (loaded < 0) {
-          showComposeProgress(null, hasFile ? "Uploading to Sia…" : "Announcing…");
-          startComposePoll(uploadId, hasFile);
-          return;
+      const clientFile = packed ? packed.file : file;
+      const clientThumb = packed ? packed.thumb : thumb;
+      if (priced) {
+        throw new Error("A priced file stays on a node you operate. Leave the price blank to store it from this page.");
+      }
+      if (!clientIdentity()) {
+        setComposeLocked(true);
+        throw new Error("Sign in to upload photos and videos.");
+      }
+      if (hasFile) {
+        showComposeProgress(null, "Yada Password is uploading…");
+        const uploaded = await storeWithPassword(clientFile, clientThumb, {
+          title: (composeTitle && composeTitle.value) || clientFile.name || "upload",
+          description: (document.getElementById("compose-description") || {}).value || "",
+          kind: composeType ? composeType.value : "",
+        });
+        fd.delete("file");
+        fd.set("file_id", uploaded.file_id);
+        fd.set("share_url", uploaded.share_url);
+        fd.set("filename", clientFile.name || "");
+        fd.set("mime_type", clientFile.type || "");
+        fd.set("size", String(uploaded.size || clientFile.size || 0));
+        fd.set("transaction_id", uploaded.transaction_id || "");
+        if (uploaded.thumbnail_file_id) {
+          fd.delete("thumbnail");
+          fd.set("thumbnail_file_id", uploaded.thumbnail_file_id);
+          fd.set("thumbnail_share_url", uploaded.thumbnail_share_url || "");
         }
-        const pct = total ? Math.round((loaded / total) * 100) : 0;
-        showComposeProgress(pct, `Sending to node ${pct}%`);
-      });
+        try { localStorage.removeItem("yada-sia-app-key"); } catch (_) {}
+      }
       if (req !== composeReq) throw abortError();
       announced = true;
       stopComposePoll();
-      showComposeProgress(100, "Done");
+      showComposeProgress(100, "Stored");
       if (parseRoute().view === "upload") {
+        const storedId = fd.get("file_id") || "";
         composeForm.reset();
         composeAutoTitle = "";
         applyComposeType(parseRoute(), true);
-        setComposeMsg(`Announced${data.result && data.result.file_id ? `: ${data.result.file_id}` : ""}`, "ok");
+        setComposeMsg(storedId ? "Announced: " + storedId : "Announced", "ok");
       }
       photosLoadedQuery = null;
       loadedPin = null;
     } catch (err) {
       stopComposePoll();
       hideComposeProgress();
-      if (err.status === 401) setComposeLocked(true);
+      if (!clientIdentity()) setComposeLocked(true);
       setComposeMsg(err.message || "upload failed", "err");
     } finally {
       stopComposePoll();
@@ -2295,6 +2458,164 @@
       buyCheck.textContent = label;
     }
   });
+  function loadStripeOnramp() {
+    if (window.StripeOnramp) return Promise.resolve(window.StripeOnramp);
+    return new Promise((resolve, reject) => {
+      const outer = document.createElement("script");
+      outer.src = "https://crypto-js.stripe.com/crypto-onramp-outer.js";
+      outer.onload = () => resolve(window.StripeOnramp);
+      outer.onerror = () => reject(new Error("Stripe onramp failed to load"));
+      document.head.appendChild(outer);
+    });
+  }
+
+  async function headlessOnramp(pk) {
+    if (window.__yadaOnramp) return window.__yadaOnramp;
+    const mod = await import("https://esm.sh/@stripe/crypto");
+    window.__yadaOnramp = await mod.loadCryptoOnrampAndInitialize(pk, { theme: "night" });
+    return window.__yadaOnramp;
+  }
+
+  async function onrampPost(path, body) {
+    const res = await fetch(path, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(body || {}),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.status === false) {
+      const err = data.error;
+      throw new Error((err && (err.code || err.message)) || (typeof err === "string" ? err : "") || data.message || "onramp failed");
+    }
+    return data;
+  }
+
+  async function verifyOnrampDocuments(onramp) {
+    const verified = await onramp.verifyDocuments();
+    const abandoned = verified === "abandoned" || (verified && verified.result === "abandoned");
+    if (abandoned) throw new Error("Identity check was cancelled");
+  }
+
+  async function finishOnramp(onramp, wallet, paymentToken, amount) {
+    let session;
+    try {
+      session = await onrampPost("/crypto-onramp/session", {
+        wallet_address: wallet,
+        payment_token: paymentToken,
+        source_amount: amount,
+      });
+    } catch (err) {
+      if (!/missing_document_verification/i.test(err.message || "")) throw err;
+      await verifyOnrampDocuments(onramp);
+      session = await onrampPost("/crypto-onramp/session", {
+        wallet_address: wallet,
+        payment_token: paymentToken,
+        source_amount: amount,
+      });
+    }
+    const done = await onramp.performCheckout(session.id, async (sessionId) => {
+      try {
+        const checked = await onrampPost("/crypto-onramp/checkout", { session_id: sessionId });
+        return checked.client_secret;
+      } catch (err) {
+        if (!/quote/i.test(err.message || "")) throw err;
+        await onrampPost("/crypto-onramp/quote", { session_id: sessionId });
+        const checked = await onrampPost("/crypto-onramp/checkout", { session_id: sessionId });
+        return checked.client_secret;
+      }
+    });
+    if (buyNote) {
+      buyNote.textContent = done.successful
+        ? "The purchase is on the way. Approve the swap, then unwrap, so YDA can be paid."
+        : "Card checkout did not finish.";
+    }
+  }
+
+  async function mountOnramp(wallet) {
+    onrampElement.hidden = false;
+    const cfg = await fetch("/stripe-config", { credentials: "same-origin" }).then((r) => r.json());
+    const onramp = await headlessOnramp(cfg.stripe_public_key);
+    const email = document.getElementById("onramp-email").value.trim();
+    const phone = document.getElementById("onramp-phone").value.trim();
+    const name = document.getElementById("onramp-name").value.trim();
+    const amount = document.getElementById("onramp-amount").value.trim() || "20";
+    if (!email || !phone || !name) throw new Error("Email, phone, and name are required");
+    let auth;
+    const authRes = await fetch("/crypto-onramp/link-auth", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ email }),
+    });
+    auth = await authRes.json().catch(() => ({}));
+    if (authRes.status === 404 || auth.needs_register) {
+      await onramp.registerLinkUser({ email, phone, country: "US", fullName: name });
+      auth = await onrampPost("/crypto-onramp/link-auth", { email });
+    } else if (!authRes.ok || !auth.auth_intent_id) {
+      throw new Error((auth.error && auth.error.message) || auth.error || "Link auth failed");
+    }
+    const authEl = await onramp.authenticate(auth.auth_intent_id, async (result) => {
+      if (result.result !== "success" || !result.crypto_customer_id) {
+        throw new Error(result.result || "Link auth was not completed");
+      }
+      await onrampPost("/crypto-onramp/tokens", {
+        auth_intent_id: auth.auth_intent_id,
+        crypto_customer_id: result.crypto_customer_id,
+      });
+      const customer = await fetch("/crypto-onramp/customer", { credentials: "same-origin" }).then((r) => r.json());
+      const verifications = customer.verifications || [];
+      const needsKyc = verifications.some((v) => v.type === "kyc_verified" && v.status === "not_started");
+      if (needsKyc) {
+        await onramp.submitKycInfo({
+          given_name: document.getElementById("onramp-given").value.trim(),
+          surname: document.getElementById("onramp-surname").value.trim(),
+          id_number: { value: document.getElementById("onramp-ssn").value.trim(), type: "us_ssn" },
+          date_of_birth: {
+            day: Number(document.getElementById("onramp-day").value),
+            month: Number(document.getElementById("onramp-month").value),
+            year: Number(document.getElementById("onramp-year").value),
+          },
+          address: {
+            line1: document.getElementById("onramp-line1").value.trim(),
+            city: document.getElementById("onramp-city").value.trim(),
+            state: document.getElementById("onramp-state").value.trim().toUpperCase(),
+            postal_code: document.getElementById("onramp-postal").value.trim(),
+            country: "US",
+          },
+        });
+      }
+      const needsDocs = verifications.some((v) => ["failed", "rejected", "requires_action"].includes(v.status));
+      if (needsDocs) await verifyOnrampDocuments(onramp);
+      const wallets = await fetch("/crypto-onramp/wallets", { credentials: "same-origin" }).then((r) => r.json());
+      const listed = (wallets.data || []).some((item) => {
+        return item.network === "base" && String(item.wallet_address || "").toLowerCase() === wallet.toLowerCase();
+      });
+      if (!listed) await onramp.registerWalletAddress(wallet, "base");
+      const saved = await fetch("/crypto-onramp/payment-tokens", { credentials: "same-origin" }).then((r) => r.json());
+      const existing = (saved.data || [])[0];
+      if (existing && existing.id) {
+        await finishOnramp(onramp, wallet, existing.id, amount);
+        return;
+      }
+      const payEl = await onramp.collectPaymentMethod(
+        { payment_method_types: ["card"], wallets: { applePay: "auto", googlePay: "auto" } },
+        async (paid) => {
+          await finishOnramp(onramp, wallet, paid.cryptoPaymentToken, amount);
+        }
+      );
+      document.getElementById("onramp-pay").replaceChildren(payEl);
+    });
+    if (authEl) document.getElementById("onramp-auth").replaceChildren(authEl);
+    if (buyNote) buyNote.textContent = "This gets YDA for your identity. It does not pay the post.";
+  }
+
+  if (buyOnramp) {
+    buyOnramp.addEventListener("click", () => {
+      window.location.assign(onrampUrl());
+    });
+  }
+
   if (buyNode) {
     buyNode.addEventListener("click", async () => {
       const item = buyItem || activeItem();
@@ -2592,6 +2913,9 @@
     }
     if (path === "/upload" || path === "upload") {
       return { view: "upload", type: params.get("type") || "" };
+    }
+    if (path === "/fund" || path === "fund") {
+      return { view: "fund" };
     }
     if (path === "/publish" || path === "publish") {
       return { view: "publish" };
@@ -3188,7 +3512,7 @@
   function formatGifts(value) {
     const n = Number(value);
     if (!Number.isFinite(n)) return "—";
-    return n.toLocaleString(undefined, { maximumFractionDigits: 8 });
+    return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
   function applyProfileLive(profile) {
@@ -3387,9 +3711,10 @@
     profileEl.hidden = !onProfile;
     badgesEl.hidden = viewName !== "badges";
     publishEl.hidden = viewName !== "publish";
+    if (fundEl) fundEl.hidden = viewName !== "fund";
     uploadEl.hidden = viewName !== "upload";
     navFyp.classList.toggle("active", onFeed);
-    navUpload.classList.toggle("active", viewName === "upload");
+    navUpload.classList.toggle("active", viewName === "upload" || viewName === "fund");
     navProfile.classList.toggle("active", viewName === "me" || viewName === "publish");
     if (onFeed) {
       const pin = route.transaction_id || "";
@@ -3417,7 +3742,18 @@
     if (onProfile) loadProfile(route);
     if (viewName === "me") loadOwnProfile();
     if (viewName === "badges") loadBadges(route);
-    if (viewName === "upload") openCompose();
+    if (viewName === "upload") {
+      uploadEl.hidden = true;
+      ensurePostAllowed().then((ok) => {
+        if (!ok || parseRoute().view !== "upload") return;
+        uploadEl.hidden = false;
+        openCompose();
+      });
+    } else if (viewName === "fund") {
+      ensurePostAllowed().then((ok) => {
+        if (ok && clientIdentity() && parseRoute().view === "fund") openUpload("");
+      });
+    }
     else {
       if (composeBusy) abortComposeUpload();
       stopComposePoll();
@@ -3475,6 +3811,7 @@
       location.hash.startsWith("#/@") ||
       location.hash.startsWith("#/badges") ||
       location.hash.startsWith("#/publish") ||
+      location.hash.startsWith("#/fund") ||
       location.hash.startsWith("#/upload") ||
       location.hash === "#/me"
     ) {
@@ -3517,6 +3854,30 @@
   playerBack.addEventListener("click", closePlayer);
   railGift.addEventListener("click", () => openGift(activeItem()));
   railReport.addEventListener("click", () => openReport(activeItem()));
+  async function ensurePostAllowed() {
+    const id = clientIdentity();
+    if (!id) {
+      if (parseRoute().view !== "publish") location.hash = "#/publish";
+      return false;
+    }
+    try {
+      const res = await fetch(
+        "/crypto-onramp/usdc-balance?address=" + encodeURIComponent(id.address),
+        { credentials: "same-origin" }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ok && data.raw != null && BigInt(data.raw) > 0n) return true;
+    } catch (_) {}
+    if ((location.hash || "") !== "#/fund") location.hash = "#/fund";
+    return false;
+  }
+
+  async function goPost(fileType) {
+    const ok = await ensurePostAllowed();
+    if (!ok) return;
+    openUpload(fileType || "");
+  }
+
   function openUpload(fileType) {
     const params = new URLSearchParams();
     if (fileType) params.set("type", fileType);
@@ -3530,8 +3891,8 @@
     location.hash = next;
   }
 
-  editAvatar.addEventListener("click", () => openUpload(PROFILE_PHOTO_TYPE));
-  editUpload.addEventListener("click", () => openUpload(""));
+  editAvatar.addEventListener("click", () => goPost(PROFILE_PHOTO_TYPE));
+  editUpload.addEventListener("click", () => goPost(""));
   profileTabVideos.addEventListener("click", () => {
     profileMedia = "videos";
     renderProfileGrid();
@@ -3701,7 +4062,7 @@
   setTimeout(() => {
     if (!extReady) {
       extStatus.textContent =
-        "Sign in does not need the extension on this page. Approve the request in the Yada Password extension or the Android/iOS app. Register and Resync still use the extension.";
+        "Sign in opens the Yada Password app. It does not unlock this node. Register and Resync still use the extension.";
       extStatus.className = "signin-status";
     }
   }, 1500);
@@ -3803,7 +4164,7 @@
   async function waitForAuthApproval(sessionId, created, signal) {
     const remote = authPollBase(created);
     const started = Date.now();
-    while (!signal.aborted) {
+    while (!signal || !signal.aborted) {
       if (Date.now() - started > 180000) {
         throw new Error("timed out waiting for approval");
       }
@@ -3900,7 +4261,6 @@
     startSigninProgress("Creating sign-in request…");
     signinBtn.textContent = "Cancel";
     try {
-      const expectedHash = await expectedSigninHash(signal);
       const createRes = await fetch("/password-rotation/auth-session", {
         method: "POST",
         headers: {
@@ -3911,8 +4271,7 @@
         body: JSON.stringify({
           username,
           site: signinOrigin,
-          action: "operator",
-          expectedHash,
+          action: "client",
         }),
         signal,
       });
@@ -3924,31 +4283,31 @@
       showSigninProgress(
         (created.delivered
           ? "Delivered to Yada Password"
-          : "Open Yada Password (extension or Android/iOS app)") +
+          : "Open Yada Password") +
           " and Approve" +
           home
       );
       const view = await waitForAuthApproval(created.session_id, created, signal);
-      if (!view.ok && !view.operator_session && !view.authenticated) {
+      if (!view.ok || !/^0x[0-9a-fA-F]{40}$/.test(view.baseAddress || "")) {
         throw new Error(view.message || "sign-in was not approved");
       }
-      showSigninProgress("Approved — opening operator session…");
-      const session = await openOperatorSession(
-        "",
-        view.home_node || created.home_node || "",
-        ""
+      const signedIn = storeClientIdentity(
+        new URLSearchParams({
+          username: view.username || username,
+          identity: view.identity || "",
+        }),
+        view.baseAddress
       );
-      stashOperatorToken((session && session.token) || view.token);
       stopSigninProgress();
-      setSigninMsg("Session opened — opening your profile…", "ok");
-      await openOwnProfile();
+      setSigninMsg(signedIn ? "Signed in as @" + signedIn : "Signed in", "ok");
+      if (signinUsername && signedIn) signinUsername.value = signedIn;
+      goPost("");
     } catch (err) {
       const aborted =
         (err && err.name === "AbortError") ||
         String((err && err.message) || err) === "cancelled";
       stopSigninProgress();
-      if (!aborted) setSigninMsg(String(err.message || err), "err");
-      else setSigninMsg("Cancelled", "err");
+      setSigninMsg(aborted ? "Cancelled" : String(err.message || err), "err");
     } finally {
       signinAbort = null;
       signinBtn.textContent = SIGNIN_LABEL;
@@ -3957,18 +4316,9 @@
   loadSigninUsername();
 
   navUpload.addEventListener("click", () => {
-    if (location.pathname !== "/") {
-      openUpload("");
-      return;
-    }
-    const next = "#/publish";
-    if ((location.hash || "") === next) {
-      closePlayer();
-      syncRoute();
-      return;
-    }
-    location.hash = next;
+    goPost("");
   });
+  if (fundBack) fundBack.addEventListener("click", leaveOverlay);
   uploadBack.addEventListener("click", leaveOverlay);
   composeSignin.addEventListener("click", () => {
     location.hash = "#/me";
@@ -4076,6 +4426,8 @@
     if (viewName === "profile" && currentProfile) applyProfileLive(currentProfile);
   }
 
+  absorbStorageKey();
+  absorbBaseAddress().then(notePendingUnwrap);
   loadMyBadges();
   loadReasons();
   loadLive();

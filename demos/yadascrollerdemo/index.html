@@ -116,7 +116,7 @@
           <h1>Run a node</h1>
           <p>Uploading needs your own node. Watching this feed does not.</p>
           <p><a class="pill" href="/download">Run a node</a></p>
-          <p id="ext-status" class="signin-status">Sign in sends a request. Approve it in the Yada Password extension or the Android/iOS app.</p>
+          <p id="ext-status" class="signin-status">Sign in sends your username through this node to Yada Password. Approve it there. This page keeps the identity. It does not unlock this node.</p>
           <label class="signin-label" for="signin-username">Yada username</label>
           <input id="signin-username" class="signin-input" type="text" autocomplete="username" placeholder="your-yada-username" />
           <div class="signin-actions">
@@ -149,6 +149,20 @@
       </div>
     </div>
 
+    <section id="fund" class="profile" hidden>
+      <header class="profile-top">
+        <button type="button" id="fund-back" aria-label="Back">‹</button>
+        <div class="profile-top-title">Post</div>
+      </header>
+      <div class="profile-scroll">
+        <article class="doc">
+          <h1>No funds to post</h1>
+          <p>You do not have any YDA to post. Get YDA before you can post content.</p>
+          <p><a class="pill" href="/crypto-onramp">Get YDA</a></p>
+        </article>
+      </div>
+    </section>
+
     <section id="upload" class="profile" hidden>
       <header class="profile-top">
         <button type="button" id="upload-back" aria-label="Back">‹</button>
@@ -156,7 +170,7 @@
       </header>
       <div class="profile-scroll">
         <form id="compose-form" class="compose" action="#" method="post">
-          <p class="compose-lead">Files are stored on the selected backend. Title, description, and keywords are announced on-chain. Photos and videos get a thumbnail automatically.</p>
+          <p class="compose-lead">A free file is stored from this page on Sia. It does not unlock this node or announce as the node operator.</p>
           <fieldset id="compose-fields">
             <label for="compose-file">File</label>
             <input type="file" name="file" id="compose-file" />
@@ -188,7 +202,7 @@
                 <div class="progress-bar" id="compose-progress-bar"></div>
               </div>
             </div>
-            <button class="compose-submit" type="submit" id="compose-submit">Upload &amp; announce</button>
+            <button class="compose-submit" type="submit" id="compose-submit">Upload</button>
           </fieldset>
           <p class="compose-msg" id="compose-msg" hidden role="status"></p>
           <button type="button" class="pill compose-signin" id="compose-signin" hidden>Sign in</button>
@@ -217,6 +231,26 @@
         <p class="gift-note" id="buy-warn">This purchase stays in this browser. <a href="/download">Run a node</a> to open it from another browser.</p>
         <button type="button" class="btn" id="buy-check">I've paid</button>
         <button type="button" class="btn ghost" id="buy-node" hidden>Pay from this node</button>
+        <button type="button" class="btn ghost" id="buy-onramp">Buy tokens</button>
+        <div id="onramp-element" hidden>
+          <label>Email <input id="onramp-email" type="email" autocomplete="email"></label>
+          <label>Phone <input id="onramp-phone" type="tel" placeholder="+12125551234"></label>
+          <label>Name <input id="onramp-name" autocomplete="name"></label>
+          <label>Amount USD <input id="onramp-amount" inputmode="decimal" value="20"></label>
+          <label>Given name <input id="onramp-given" autocomplete="given-name"></label>
+          <label>Surname <input id="onramp-surname" autocomplete="family-name"></label>
+          <label>SSN <input id="onramp-ssn" inputmode="numeric" autocomplete="off"></label>
+          <label>Birth day <input id="onramp-day" inputmode="numeric"></label>
+          <label>Birth month <input id="onramp-month" inputmode="numeric"></label>
+          <label>Birth year <input id="onramp-year" inputmode="numeric"></label>
+          <label>Address <input id="onramp-line1" autocomplete="address-line1"></label>
+          <label>City <input id="onramp-city" autocomplete="address-level2"></label>
+          <label>State <input id="onramp-state" maxlength="2" autocomplete="address-level1"></label>
+          <label>Postal <input id="onramp-postal" autocomplete="postal-code"></label>
+          <button type="button" class="btn" id="onramp-continue">Continue</button>
+          <div id="onramp-auth"></div>
+          <div id="onramp-pay"></div>
+        </div>
       </form>
     </dialog>
 
@@ -316,6 +350,7 @@
     })();
   </script>
   <script src="/app/assets/qrcode.js"></script>
+  <script src="/file-announcements/demo/yadascroller/sia.js"></script>
   <script src="/file-announcements/demo/yadascroller/app.js"></script>
 </body>
 </html>
