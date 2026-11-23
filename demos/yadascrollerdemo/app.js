@@ -27,11 +27,15 @@
     { id: "diamond", name: "Diamond", emoji: "💎", price: 500 },
   ];
 
+  const ONRAMP_URL = "https://centeridentity.com/crypto-onramp";
+
   function onrampUrl() {
-    return "/crypto-onramp?return_url=" + encodeURIComponent(location.origin + "/");
+    return ONRAMP_URL + "?return_url=" + encodeURIComponent(location.origin + "/");
   }
 
-  for (const link of document.querySelectorAll('a[href="/crypto-onramp"]')) {
+  for (const link of document.querySelectorAll(
+    'a[href="/crypto-onramp"], a[href^="' + ONRAMP_URL + '"]'
+  )) {
     link.href = onrampUrl();
   }
 
