@@ -3943,8 +3943,8 @@
   }
 
   const signinOrigin = window.location.origin.toLowerCase();
-  const USERNAME_KEY = "yada-scroller-username";
   let extReady = false;
+  let extUsername = "";
   let signinReqSeq = 0;
   let signinWorking = false;
   let signinRequestId = "";
@@ -4017,31 +4017,6 @@
     });
   }
 
-  function stashOperatorToken(token) {
-    if (!token) return;
-    try {
-      sessionStorage.setItem("yadaOperatorToken", token);
-    } catch (_) {}
-  }
-
-  async function openOperatorSession(password, homeNode, passwordEnc) {
-    const body = { branch_peer: signinOrigin };
-    if (passwordEnc) body.password_enc = passwordEnc;
-    else if (password) body.password = password;
-    if (homeNode) body.home_node = String(homeNode).replace(/\/+$/, "");
-    const res = await fetch("/password-rotation/admin-session", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      credentials: "include",
-      body: JSON.stringify(body),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || !data.status) {
-      throw new Error(data.message || `admin session failed (${res.status})`);
-    }
-    return data;
-  }
-
   window.addEventListener("message", (event) => {
     if (event.source !== window) return;
     if (event.data && event.data.type === "YADA_PASSWORD_READY") {
@@ -4049,6 +4024,7 @@
       extStatus.textContent = "Extension ready.";
       extStatus.className = "signin-status ok";
       setSigninLocked(signinWorking);
+      void syncExtensionUsername();
     }
     if (
       event.data &&
@@ -4067,39 +4043,52 @@
     }
   }, 1500);
 
-  function rememberUsername(name) {
-    try {
-      sessionStorage.setItem(USERNAME_KEY, name);
-    } catch (_) {}
+  function applyExtensionUsername(name) {
+    const clean = String(name || "").trim().replace(/^@/, "");
+    if (!clean || !signinUsername) return;
+    extUsername = clean;
+    signinUsername.value = clean;
+    signinUsername.readOnly = true;
+    signinUsername.title = "Active identity in Yada Password";
+  }
+
+  function requestExtensionIdentity(timeoutMs = 1200) {
+    const requestId = `u${++signinReqSeq}_${Date.now()}`;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        window.removeEventListener("message", onMsg);
+        resolve(null);
+      }, timeoutMs);
+      function onMsg(event) {
+        if (event.source !== window) return;
+        const data = event.data;
+        if (!data || data.type !== "YADA_PASSWORD_CLIENT_RESULT") return;
+        if (data.requestId !== requestId) return;
+        clearTimeout(timer);
+        window.removeEventListener("message", onMsg);
+        resolve(data && data.ok ? data : null);
+      }
+      window.addEventListener("message", onMsg);
+      window.postMessage({ type: "YADA_PASSWORD_CLIENT", requestId }, "*");
+    });
+  }
+
+  async function syncExtensionUsername() {
+    if (!signinUsername) return;
+    const data = await requestExtensionIdentity();
+    if (!data) return;
+    extReady = true;
+    applyExtensionUsername(data.username);
+    if (extUsername) {
+      extStatus.textContent = `Extension ready · active identity @${extUsername}`;
+      extStatus.className = "signin-status ok";
+    }
   }
 
   function currentUsername() {
     return ((signinUsername && signinUsername.value) || "")
       .trim()
       .replace(/^@/, "");
-  }
-
-  async function loadSigninUsername() {
-    if (!signinUsername) return;
-    try {
-      const saved = sessionStorage.getItem(USERNAME_KEY) || "";
-      if (saved && !signinUsername.value) signinUsername.value = saved;
-    } catch (_) {}
-    if (signinUsername.value) return;
-    try {
-      const res = await fetch("/yada-config", {
-        headers: { Accept: "application/json" },
-        credentials: "include",
-      });
-      const data = await res.json().catch(() => ({}));
-      const name = (
-        (data && data.identity && data.identity.username) ||
-        ""
-      )
-        .trim()
-        .replace(/^@/, "");
-      if (name && !signinUsername.value) signinUsername.value = name;
-    } catch (_) {}
   }
 
   function sleep(ms, signal) {
@@ -4116,25 +4105,6 @@
       }
       signal.addEventListener("abort", onAbort, { once: true });
     });
-  }
-
-  async function expectedSigninHash(signal) {
-    try {
-      const tipRes = await fetch(
-        "/password-rotation/offchain/tip?branch_peer=" +
-          encodeURIComponent(signinOrigin),
-        { headers: { Accept: "application/json" }, credentials: "include", signal }
-      );
-      const tipData = await tipRes.json();
-      const pre =
-        tipData &&
-        tipData.tip &&
-        tipData.tip.password &&
-        tipData.tip.password.prerotated_password_hash;
-      return pre || undefined;
-    } catch (_) {
-      return undefined;
-    }
   }
 
   function authPollBase(_created) {
@@ -4249,13 +4219,13 @@
       signinAbort.abort();
       return;
     }
+    if (extReady) await syncExtensionUsername();
     const username = currentUsername();
     if (!username) {
       setSigninMsg("Enter your Yada username.", "err");
       if (signinUsername) signinUsername.focus();
       return;
     }
-    rememberUsername(username);
     signinAbort = new AbortController();
     const signal = signinAbort.signal;
     startSigninProgress("Creating sign-in request…");
@@ -4313,7 +4283,7 @@
       signinBtn.textContent = SIGNIN_LABEL;
     }
   });
-  loadSigninUsername();
+  syncExtensionUsername();
 
   navUpload.addEventListener("click", () => {
     goPost("");
