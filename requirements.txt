@@ -1,4 +1,6 @@
 # Optional. Required only when using the sia.storage backend.
 # 0.12+ SharedSdk views another user's announcement with its sharing key.
 # An App Key is still required to upload and announce.
-sia-storage>=0.12.0
+# Note: the slab-recovery panic fixed in 0.13.2 is not on PyPI yet; 0.13.1 is
+# the newest published Python wheel. Bump this floor once 0.13.2+ ships.
+sia-storage>=0.13.1

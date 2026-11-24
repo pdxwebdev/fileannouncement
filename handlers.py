@@ -1362,6 +1362,7 @@ class PublicStreamHandler(BaseHandler):
 
     async def _write_span(self, read_chunk, start, end):
         remaining = end - start + 1
+        wrote = False
         try:
             while remaining > 0:
                 chunk = await read_chunk(remaining)
@@ -1370,6 +1371,7 @@ class PublicStreamHandler(BaseHandler):
                 if len(chunk) > remaining:
                     chunk = chunk[:remaining]
                 self.write(chunk)
+                wrote = True
                 await self.flush()
                 remaining -= len(chunk)
         except StreamClosedError:
@@ -1378,6 +1380,17 @@ class PublicStreamHandler(BaseHandler):
             if not self._finished:
                 self.set_status(404)
                 self.finish("cache entry unavailable")
+            return
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            # A storage backend can fail mid-stream (for example the Sia SDK
+            # panicking while rebuilding a slab). Before any bytes are sent we
+            # can still answer with a clean error instead of an uncaught 500.
+            app_log.warning("stream read failed: %s", exc)
+            if not wrote and not self._finished:
+                self.set_status(502)
+                self.finish("storage temporarily unavailable")
             return
         if not self._finished:
             self.finish()

@@ -13,6 +13,7 @@ Full license terms: see LICENSE.txt in this repository.
 
 """Pluggable file storage backends. Sia (https://sia.storage) is implemented now."""
 
+import asyncio
 import hashlib
 import inspect
 import json
@@ -31,6 +32,54 @@ SHARE_URL_TTL = timedelta(days=3650)
 
 class StorageBackendError(Exception):
     pass
+
+
+# The Sia SDK recovers a slab's shards in a Rust task. Before 0.13.2 a slab
+# that referenced a host missing from the SDK's host list (for example a host
+# the indexer stopped listing) panicked with an "index out of bounds" message
+# and surfaced as a DownloadError wrapping a join error. The panic is
+# deterministic for that slab, but a fresh SDK connection can pick up a host
+# list that no longer omits the host, so we reconnect and retry once before
+# giving up. See SiaFoundation/sia-storage-sdk CHANGELOG 0.13.2.
+_SDK_DOWNLOAD_PANIC_HINTS = (
+    "join error",
+    "index out of bounds",
+    "panicked",
+)
+
+
+def _is_sdk_download_panic(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return any(hint in text for hint in _SDK_DOWNLOAD_PANIC_HINTS)
+
+
+def _download_error(exc: BaseException) -> StorageBackendError:
+    if _is_sdk_download_panic(exc):
+        return StorageBackendError(
+            "the storage SDK crashed while reading this object "
+            f"(upstream sia-storage slab bug: {exc}). Upgrade sia-storage to a "
+            "0.13.2+ build once it is published to PyPI."
+        )
+    return StorageBackendError(str(exc))
+
+
+def _object_metadata(obj) -> dict:
+    raw_meta = getattr(obj, "metadata", None)
+    if callable(raw_meta):
+        try:
+            raw_meta = raw_meta()
+        except Exception:
+            raw_meta = None
+    if not raw_meta:
+        return {}
+    try:
+        return json.loads(
+            raw_meta.decode("utf-8", errors="replace")
+            if isinstance(raw_meta, (bytes, bytearray))
+            else str(raw_meta)
+        )
+    except Exception:
+        return {}
 
 
 def is_share_url(value: str) -> bool:
@@ -353,6 +402,42 @@ class SiaStorageBackend(StorageBackend):
         except Exception as exc:
             raise StorageBackendError(str(exc)) from exc
 
+    def _invalidate(self, file_id: str, share_url: str = ""):
+        """Forget cached SDK/object state so the next read reconnects.
+
+        Dropping the SDK forces a fresh host list, which is what lets a retry
+        succeed after the SDK recovered a slab against a stale host list.
+        """
+        link = (share_url or "").strip()
+        try:
+            seed = sharing_seed(link)
+        except StorageBackendError:
+            seed = None
+        if seed is not None:
+            ident = (file_id or "").strip()
+            _OBJECT_CACHE.pop((self.indexer_url, seed.hex(), ident), None)
+            self._drop_shared_sdk(seed)
+            return
+        ident = link or (file_id or "").strip()
+        _OBJECT_CACHE.pop((self.indexer_url, self.app_key_hex, ident), None)
+        self._drop_sdk()
+
+    async def _start_download(
+        self,
+        file_id: str,
+        share_url: str,
+        offset: int,
+        length: Optional[int],
+    ):
+        sdk, obj = await self._client_and_object(file_id, share_url)
+        from sia_storage import DownloadOptions
+
+        opts = DownloadOptions(
+            offset=int(offset or 0),
+            length=None if length is None else int(length),
+        )
+        return obj, sdk.download(obj, opts)
+
     async def open_download(
         self,
         file_id: str,
@@ -361,8 +446,8 @@ class SiaStorageBackend(StorageBackend):
         length: Optional[int] = None,
     ):
         try:
-            sdk, obj = await self._client_and_object(file_id, share_url)
-            from sia_storage import DownloadOptions
+            obj, handle = await self._start_download(file_id, share_url, offset, length)
+            total = int(obj.size())
         except StorageBackendError:
             raise
         except ImportError as exc:
@@ -370,27 +455,40 @@ class SiaStorageBackend(StorageBackend):
                 "sia-storage SDK is not installed. Run: pip install -U 'sia-storage>=0.12.0'"
             ) from exc
         except Exception as exc:
-            raise StorageBackendError(str(exc)) from exc
-        try:
-            total = int(obj.size())
-            opts = DownloadOptions(
-                offset=int(offset or 0),
-                length=None if length is None else int(length),
-            )
-            handle = sdk.download(obj, opts)
-        except StorageBackendError:
-            raise
-        except Exception as exc:
-            self._drop_sdk()
+            self._invalidate(file_id, share_url)
             raise StorageBackendError(str(exc)) from exc
 
         async def chunks():
-            try:
-                async for chunk in handle:
-                    if chunk:
-                        yield chunk
-            finally:
-                await handle.close()
+            nonlocal handle
+            yielded = False
+            retried = False
+            while True:
+                try:
+                    async for chunk in handle:
+                        if chunk:
+                            yielded = True
+                            yield chunk
+                    return
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    if yielded or retried or not _is_sdk_download_panic(exc):
+                        raise _download_error(exc) from exc
+                    retried = True
+                    self._invalidate(file_id, share_url)
+                finally:
+                    try:
+                        await handle.close()
+                    except Exception:
+                        pass
+                try:
+                    _obj, handle = await self._start_download(
+                        file_id, share_url, offset, length
+                    )
+                except StorageBackendError:
+                    raise
+                except Exception as exc:
+                    raise StorageBackendError(str(exc)) from exc
 
         return total, chunks()
 
@@ -465,36 +563,23 @@ class SiaStorageBackend(StorageBackend):
         return await self._grant_share(sdk, obj)
 
     async def download(self, file_id: str, share_url: str = "") -> dict:
-        sdk, obj = await self._client_and_object(file_id, share_url)
         try:
-            from sia_storage import DownloadOptions
-        except ImportError as exc:
-            raise StorageBackendError(
-                "sia-storage SDK is not installed. Run: pip install -U 'sia-storage>=0.12.0'"
-            ) from exc
-        async with sdk.download(obj, DownloadOptions()) as d:
-            raw = await d.read_all()
-        meta = {}
-        raw_meta = getattr(obj, "metadata", None)
-        if callable(raw_meta):
-            try:
-                raw_meta = raw_meta()
-            except Exception:
-                raw_meta = None
-        if raw_meta:
-            try:
-                meta = json.loads(
-                    raw_meta.decode("utf-8", errors="replace")
-                    if isinstance(raw_meta, (bytes, bytearray))
-                    else str(raw_meta)
-                )
-            except Exception:
-                meta = {}
+            _sdk, obj = await self._client_and_object(file_id, share_url)
+            meta = _object_metadata(obj)
+            total, chunks = await self.open_download(file_id, share_url=share_url)
+            parts = []
+            async for chunk in chunks:
+                parts.append(chunk)
+        except StorageBackendError:
+            raise
+        except Exception as exc:
+            raise StorageBackendError(str(exc)) from exc
+        raw = b"".join(parts)
         return {
             "file_id": file_id,
             "content": raw,
             "metadata": meta,
-            "size": len(raw),
+            "size": total if total else len(raw),
         }
 
     async def delete(self, file_id: str) -> dict:
