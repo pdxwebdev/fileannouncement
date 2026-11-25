@@ -1231,6 +1231,31 @@ html.landing .site-menu-btn {
   animation: yada-slide 1.1s ease-in-out infinite;
 }
 
+.signin-tutorial {
+  margin: 12px 0 0;
+  padding: 12px;
+  border: 1px solid #333;
+  border-radius: 8px;
+  background: #111;
+}
+
+.signin-tutorial[hidden] {
+  display: none;
+}
+
+.signin-tutorial p {
+  margin: 0 0 8px;
+  font-weight: 600;
+}
+
+.signin-tutorial video {
+  display: block;
+  width: 100%;
+  max-width: 320px;
+  border-radius: 6px;
+  background: #000;
+}
+
 .ext-step-head {
   display: flex;
   align-items: flex-start;

@@ -102,6 +102,7 @@
   const vaultReload = document.getElementById("vault-reload");
   const vaultMsg = document.getElementById("vault-msg");
   const signinStep = document.getElementById("signin-step");
+  const signinTutorial = document.getElementById("signinTutorial");
   const signinMsg = document.getElementById("signin-msg");
   const signinTrack = document.getElementById("signin-track");
   const registerBtn = document.getElementById("register-btn");
@@ -4505,6 +4506,7 @@
     }
     signinAbort = new AbortController();
     const signal = signinAbort.signal;
+    if (signinTutorial) signinTutorial.hidden = true;
     startSigninProgress("Creating sign-in request…");
     signinBtn.textContent = "Cancel";
     try {
@@ -4540,6 +4542,7 @@
           " and Approve" +
           home
       );
+      if (signinTutorial) signinTutorial.hidden = false;
       const view = await waitForAuthApproval(created.session_id, created, signal);
       if (!view.ok || !/^0x[0-9a-fA-F]{40}$/.test(view.baseAddress || "")) {
         throw new Error(view.message || "sign-in was not approved");
@@ -4564,6 +4567,7 @@
     } finally {
       signinAbort = null;
       signinBtn.textContent = SIGNIN_LABEL;
+      if (signinTutorial) signinTutorial.hidden = true;
     }
   });
   syncExtensionUsername();
