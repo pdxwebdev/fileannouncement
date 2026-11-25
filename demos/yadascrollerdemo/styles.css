@@ -1231,6 +1231,203 @@ html.landing .site-menu-btn {
   animation: yada-slide 1.1s ease-in-out infinite;
 }
 
+.ext-step-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ext-step-head .signin-status {
+  flex: 1;
+}
+
+.ext-refresh {
+  flex: none;
+  margin-top: 12px;
+}
+
+.ext-panel {
+  margin: 12px 0 0;
+  padding: 16px;
+  border: 1px solid #333;
+  border-radius: 8px;
+  background: #111;
+}
+
+.ext-panel[hidden],
+#vault-form[hidden],
+#vault-seed[hidden],
+#vault-guide[hidden],
+#vault-incept[hidden],
+#signin-step[hidden] {
+  display: none;
+}
+
+.ext-lead {
+  margin: 0 0 12px;
+  color: #c9d1d9;
+}
+
+.ext-lead strong {
+  color: #fff;
+}
+
+.ext-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin: 12px 0;
+}
+
+@media (max-width: 560px) {
+  .ext-cards {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ext-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #333;
+  border-radius: 8px;
+  background: #0d0d0d;
+}
+
+.ext-card[aria-disabled="true"] {
+  opacity: 0.75;
+}
+
+.ext-card h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.ext-card p {
+  margin: 0;
+  color: #8b949e;
+  font-size: 13px;
+}
+
+.ext-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ext-icon {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  filter: grayscale(1);
+  opacity: 0.8;
+}
+
+.ext-icon--sm {
+  width: 22px;
+  height: 22px;
+}
+
+.ext-card .pill,
+.ext-card-link,
+.ext-coming {
+  margin-top: auto;
+  text-align: center;
+  text-decoration: none;
+}
+
+.ext-coming {
+  display: block;
+  border: 1px dashed #333;
+  color: #8b949e;
+  background: transparent;
+  cursor: default;
+}
+
+.ext-vault-form {
+  display: grid;
+  gap: 12px;
+}
+
+.ext-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.ext-label input {
+  width: 100%;
+  border: 1px solid #333;
+  border-radius: 8px;
+  background: #0d0d0d;
+  color: #fff;
+  font: inherit;
+  font-size: 16px;
+  padding: 10px 12px;
+}
+
+.ext-note {
+  margin: 0;
+  padding: 10px;
+  border: 1px solid #333;
+  border-radius: 8px;
+  background: #0d0d0d;
+  color: #8b949e;
+  font-size: 12px;
+}
+
+.ext-note strong {
+  color: #c9d1d9;
+}
+
+#vault-seed p {
+  margin: 0 0 8px;
+  font-weight: 600;
+}
+
+#vault-seed-text {
+  width: 100%;
+  min-height: 64px;
+  padding: 8px;
+  resize: vertical;
+  border: 1px solid #333;
+  border-radius: 8px;
+  background: #0d0d0d;
+  color: #fff;
+  font: inherit;
+}
+
+.ext-guide {
+  margin: 0 0 12px;
+  padding-left: 20px;
+  color: #8b949e;
+}
+
+.ext-guide li {
+  margin-bottom: 4px;
+}
+
+.ext-guide strong {
+  color: #c9d1d9;
+}
+
+.ext-panel .pill {
+  margin-top: 8px;
+}
+
+#vault-seed-done,
+#vault-create,
+#vault-reload,
+#vault-incept {
+  background: #238636;
+  color: #fff;
+}
+
 @keyframes yada-spin {
   to {
     transform: rotate(360deg);

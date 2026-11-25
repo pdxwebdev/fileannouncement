@@ -113,19 +113,94 @@
       </header>
       <div class="profile-scroll">
         <article class="doc">
-          <h1>Run a node</h1>
-          <p>Uploading needs your own node. Watching this feed does not.</p>
-          <p><a class="pill" href="/download">Run a node</a></p>
-          <p id="ext-status" class="signin-status">Sign in sends your username through this node to Yada Password. Approve it there. This page keeps the identity. It does not unlock this node.</p>
-          <label class="signin-label" for="signin-username">Yada username</label>
-          <input id="signin-username" class="signin-input" type="text" autocomplete="username" placeholder="your-yada-username" />
-          <div class="signin-actions">
-            <button type="button" id="signin-btn" class="pill">Sign in</button>
-            <button type="button" id="register-btn" class="pill" disabled>Register this origin</button>
-            <button type="button" id="resync-btn" class="pill" disabled>Resync</button>
+          <h1>Sign-in</h1>
+          <div class="ext-step-head">
+            <p id="ext-status" class="signin-status">Checking for the Yada Password extension…</p>
+            <button type="button" id="ext-refresh" class="pill ext-refresh" hidden>Refresh</button>
           </div>
-          <p id="signin-msg" class="signin-msg" role="status" aria-live="polite"></p>
-          <div id="signin-track" class="signin-track" aria-hidden="true"><span></span></div>
+          <div id="install-step" class="ext-panel" hidden>
+            <p class="ext-lead">Publishing needs the <strong>Yada Password</strong> app, which holds your identity. Install it, then open it and unlock your vault.</p>
+            <div class="ext-cards">
+              <article class="ext-card">
+                <div class="ext-card-head">
+                  <svg class="ext-icon ext-icon--sm" viewBox="0 0 24 24" role="img" aria-label="Chrome">
+                    <path d="M12 0C8.21 0 4.831 1.757 2.632 4.501l3.953 6.848A5.454 5.454 0 0 1 12 6.545h10.691A12 12 0 0 0 12 0z" fill="#ea4335"/>
+                    <path d="M1.931 5.47A11.943 11.943 0 0 0 0 12c0 6.012 4.42 10.991 10.189 11.864l3.953-6.847a5.45 5.45 0 0 1-6.865-2.29z" fill="#34a853"/>
+                    <path d="M15.273 7.636a5.446 5.446 0 0 1 1.45 7.09l.002.001h-.002l-5.344 9.257c.206.01.413.016.621.016 6.627 0 12-5.373 12-12 0-1.54-.29-3.011-.818-4.364z" fill="#fbbc05"/>
+                    <path d="M12 16.364a4.364 4.364 0 1 1 0-8.728 4.364 4.364 0 0 1 0 8.728z" fill="#4285f4"/>
+                  </svg>
+                  <h3>Chrome extension</h3>
+                </div>
+                <p>Add Yada Password to Chrome on desktop.</p>
+                <a class="pill ext-card-link" href="https://chromewebstore.google.com/detail/yada-password/laknjldnoangdimihmpbekjlpklcpgkf" target="_blank" rel="noopener">Add to Chrome</a>
+              </article>
+              <article class="ext-card" aria-disabled="true">
+                <div class="ext-card-head">
+                  <svg class="ext-icon" viewBox="0 0 24 24" role="img" aria-label="Android">
+                    <path d="M17.6 9.48l1.84-3.18a.38.38 0 0 0-.66-.38l-1.86 3.22A11.4 11.4 0 0 0 12 8c-1.8 0-3.5.42-5 .92L5.14 5.92a.38.38 0 1 0-.66.38L6.4 9.48C3.6 10.94 1.7 13.6 1.4 16.7c-.02.2.14.38.34.38h20.52c.2 0 .36-.18.34-.38-.3-3.1-2.2-5.76-5-7.22zM7 14.25a1 1 0 1 1 0-2 1 1 0 0 1 0 2zm10 0a1 1 0 1 1 0-2 1 1 0 0 1 0 2z" fill="#3ddc84"/>
+                  </svg>
+                  <h3>Android</h3>
+                </div>
+                <p>Yada Password for Android is coming soon.</p>
+                <span class="pill ext-coming">Coming soon</span>
+              </article>
+              <article class="ext-card" aria-disabled="true">
+                <div class="ext-card-head">
+                  <svg class="ext-icon ext-icon--sm" viewBox="0 0 24 24" role="img" aria-label="iOS">
+                    <path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701" fill="currentColor"/>
+                  </svg>
+                  <h3>iOS</h3>
+                </div>
+                <p>Yada Password for iOS is coming soon.</p>
+                <span class="pill ext-coming">Coming soon</span>
+              </article>
+            </div>
+            <button type="button" id="install-reload" class="pill">I installed it, reload the page</button>
+          </div>
+          <div id="vault-step" class="ext-panel" hidden>
+            <p class="ext-lead">Yada Password is installed but has no vault yet. Create a vault to hold the identity you publish with.</p>
+            <form id="vault-form" class="ext-vault-form" hidden>
+              <label class="ext-label">Username
+                <input name="vaultUsername" autocomplete="username" required />
+              </label>
+              <label class="ext-label">Master password
+                <input name="vaultPassword" type="password" autocomplete="new-password" required />
+              </label>
+              <label class="ext-label">Confirm password
+                <input name="vaultPassword2" type="password" autocomplete="new-password" required />
+              </label>
+              <p class="ext-note"><strong>Important:</strong> this master password is your Yada Password second factor and cannot be recovered. We'll show a recovery phrase next — write it down and keep it safe.</p>
+              <button type="submit" id="vault-create" class="pill">Create vault</button>
+            </form>
+            <div id="vault-seed" hidden>
+              <p>Write down this recovery phrase and keep it safe. It is the only way to recover your vault.</p>
+              <textarea id="vault-seed-text" readonly rows="3" spellcheck="false"></textarea>
+              <button type="button" id="vault-seed-done" class="pill">I've saved it, continue</button>
+            </div>
+            <button type="button" id="vault-incept" class="pill" hidden>Broadcast inception</button>
+            <div id="vault-guide" hidden>
+              <p class="ext-lead">Open the <strong>Yada Password</strong> extension, then:</p>
+              <ol class="ext-guide">
+                <li>Click <strong>Generate seed</strong> and write down the recovery phrase.</li>
+                <li>Enter a <strong>username</strong> and a <strong>master password</strong> (second factor).</li>
+                <li>Click <strong>Save vault</strong>, then <strong>Broadcast inception</strong>.</li>
+                <li>Return here and reload this page.</li>
+              </ol>
+              <button type="button" id="vault-reload" class="pill">Reload this page</button>
+            </div>
+            <p id="vault-msg" class="signin-msg" role="status" aria-live="polite"></p>
+          </div>
+          <div id="signin-step" hidden>
+            <label class="signin-label" for="signin-username">Yada username</label>
+            <input id="signin-username" class="signin-input" type="text" autocomplete="username" placeholder="your-yada-username" />
+            <div class="signin-actions">
+              <button type="button" id="signin-btn" class="pill">Sign in</button>
+              <button type="button" id="register-btn" class="pill" disabled>Register this origin</button>
+              <button type="button" id="resync-btn" class="pill" disabled>Resync</button>
+            </div>
+            <p id="signin-msg" class="signin-msg" role="status" aria-live="polite"></p>
+            <div id="signin-track" class="signin-track" aria-hidden="true"><span></span></div>
+          </div>
         </article>
       </div>
     </section>

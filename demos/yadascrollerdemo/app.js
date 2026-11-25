@@ -89,6 +89,19 @@
   const fundEl = document.getElementById("fund");
   const fundBack = document.getElementById("fund-back");
   const extStatus = document.getElementById("ext-status");
+  const extRefresh = document.getElementById("ext-refresh");
+  const installStep = document.getElementById("install-step");
+  const installReload = document.getElementById("install-reload");
+  const vaultStep = document.getElementById("vault-step");
+  const vaultForm = document.getElementById("vault-form");
+  const vaultSeed = document.getElementById("vault-seed");
+  const vaultSeedText = document.getElementById("vault-seed-text");
+  const vaultSeedDone = document.getElementById("vault-seed-done");
+  const vaultIncept = document.getElementById("vault-incept");
+  const vaultGuide = document.getElementById("vault-guide");
+  const vaultReload = document.getElementById("vault-reload");
+  const vaultMsg = document.getElementById("vault-msg");
+  const signinStep = document.getElementById("signin-step");
   const signinMsg = document.getElementById("signin-msg");
   const signinTrack = document.getElementById("signin-track");
   const registerBtn = document.getElementById("register-btn");
@@ -3715,6 +3728,7 @@
     profileEl.hidden = !onProfile;
     badgesEl.hidden = viewName !== "badges";
     publishEl.hidden = viewName !== "publish";
+    if (viewName === "publish") void checkExtensionSetup();
     if (fundEl) fundEl.hidden = viewName !== "fund";
     uploadEl.hidden = viewName !== "upload";
     navFyp.classList.toggle("active", onFeed);
@@ -3769,6 +3783,7 @@
   function showOwnGate() {
     profileEl.hidden = true;
     publishEl.hidden = false;
+    void checkExtensionSetup();
   }
 
   async function loadOwnProfile() {
@@ -4025,10 +4040,9 @@
     if (event.source !== window) return;
     if (event.data && event.data.type === "YADA_PASSWORD_READY") {
       extReady = true;
-      extStatus.textContent = "Extension ready.";
-      extStatus.className = "signin-status ok";
       setSigninLocked(signinWorking);
-      void syncExtensionUsername();
+      if (parseRoute().view === "publish") void checkExtensionSetup();
+      else void syncExtensionUsername();
     }
     if (
       event.data &&
@@ -4039,13 +4053,6 @@
       showSigninProgress(String(event.data.message));
     }
   });
-  setTimeout(() => {
-    if (!extReady) {
-      extStatus.textContent =
-        "Sign in opens the Yada Password app. It does not unlock this node. Register and Resync still use the extension.";
-      extStatus.className = "signin-status";
-    }
-  }, 1500);
 
   function applyExtensionUsername(name) {
     const clean = String(name || "").trim().replace(/^@/, "");
@@ -4087,6 +4094,271 @@
       extStatus.textContent = `Extension ready · active identity @${extUsername}`;
       extStatus.className = "signin-status ok";
     }
+  }
+
+  let extSetupRunning = false;
+  let extSetupDirty = false;
+
+  function setExtensionStatus(text, kind) {
+    if (!extStatus) return;
+    extStatus.textContent = text || "";
+    extStatus.className = kind ? `signin-status ${kind}` : "signin-status";
+  }
+
+  function setVaultMsg(text, kind) {
+    if (!vaultMsg) return;
+    vaultMsg.textContent = text || "";
+    vaultMsg.className = kind ? `signin-msg ${kind}` : "signin-msg";
+  }
+
+  function showInstallStep() {
+    if (installStep) installStep.hidden = false;
+    if (vaultStep) vaultStep.hidden = true;
+    if (signinStep) signinStep.hidden = true;
+    if (extRefresh) extRefresh.hidden = true;
+    setSigninLocked(true);
+    setExtensionStatus("Yada Password isn't installed yet.", "");
+    setSigninMsg("", "");
+  }
+
+  function showVaultStep(response) {
+    if (installStep) installStep.hidden = true;
+    if (vaultStep) vaultStep.hidden = false;
+    if (signinStep) signinStep.hidden = true;
+    if (extRefresh) extRefresh.hidden = true;
+    setSigninLocked(true);
+    setExtensionStatus("Yada Password is installed but needs a vault.", "");
+    if (vaultSeed) vaultSeed.hidden = true;
+    if (vaultIncept) vaultIncept.hidden = true;
+    setVaultMsg("", "");
+    const canCreate = !!(response && response.canCreateVault);
+    if (vaultForm) vaultForm.hidden = !canCreate;
+    if (vaultGuide) vaultGuide.hidden = canCreate;
+  }
+
+  function showSigninStep() {
+    if (installStep) installStep.hidden = true;
+    if (vaultStep) vaultStep.hidden = true;
+    if (signinStep) signinStep.hidden = false;
+    if (extRefresh) extRefresh.hidden = false;
+    setSigninLocked(signinWorking);
+  }
+
+  function receiveExtensionIdentity(timeoutMs = 4000) {
+    const requestId = `s${++signinReqSeq}_${Date.now()}`;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        window.removeEventListener("message", onMsg);
+        const err = new Error("Yada Password isn't installed");
+        err.noExtension = true;
+        reject(err);
+      }, timeoutMs);
+      function onMsg(event) {
+        if (event.source !== window) return;
+        const data = event.data;
+        if (!data || data.type !== "YADA_PASSWORD_CLIENT_RESULT") return;
+        if (data.requestId !== requestId) return;
+        clearTimeout(timer);
+        window.removeEventListener("message", onMsg);
+        if (!data.ok || !data.baseAddress) {
+          const err = new Error(data.message || "no vault");
+          err.response = data;
+          err.noVault = /no vault/i.test(String(data.message || ""));
+          reject(err);
+        } else {
+          resolve(data);
+        }
+      }
+      window.addEventListener("message", onMsg);
+      window.postMessage({ type: "YADA_PASSWORD_CLIENT", requestId }, "*");
+    });
+  }
+
+  async function checkExtensionSetup() {
+    if (extSetupRunning) {
+      extSetupDirty = true;
+      return;
+    }
+    extSetupRunning = true;
+    if (extRefresh) extRefresh.hidden = true;
+    setExtensionStatus("Checking for the Yada Password extension…", "");
+    try {
+      const data = await receiveExtensionIdentity(4000);
+      extReady = true;
+      applyExtensionUsername(data.username);
+      if (data.inceptionDone === false) {
+        showVaultStep(data);
+        if (vaultForm) vaultForm.hidden = true;
+        if (vaultGuide) vaultGuide.hidden = true;
+        if (vaultIncept) vaultIncept.hidden = false;
+        setExtensionStatus("Yada Password needs inception.", "");
+        setVaultMsg("Vault found. Broadcast inception to finish setup.", "");
+        return;
+      }
+      const who = extUsername ? ` · active identity @${extUsername}` : "";
+      setExtensionStatus(`Yada Password is ready${who}.`, "ok");
+      showSigninStep();
+    } catch (err) {
+      extReady = false;
+      if (err && err.noExtension) {
+        showInstallStep();
+      } else if (err && err.noVault) {
+        showVaultStep(err.response);
+      } else {
+        showSigninStep();
+        setExtensionStatus(err && err.message ? err.message : String(err), "err");
+      }
+    } finally {
+      extSetupRunning = false;
+      if (extSetupDirty) {
+        extSetupDirty = false;
+        void checkExtensionSetup();
+      }
+    }
+  }
+
+  function createVaultFromPage(username, secondFactor) {
+    const requestId = `v${++signinReqSeq}_${Date.now()}`;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        window.removeEventListener("message", onMsg);
+        reject(new Error("Creating the vault timed out. Try again."));
+      }, 60000);
+      function onMsg(event) {
+        if (event.source !== window) return;
+        const data = event.data;
+        if (!data || data.type !== "YADA_PASSWORD_CREATE_VAULT_RESULT") return;
+        if (data.requestId !== requestId) return;
+        clearTimeout(timer);
+        window.removeEventListener("message", onMsg);
+        if (!data.ok) reject(new Error(data.message || "Could not create the vault"));
+        else resolve(data);
+      }
+      window.addEventListener("message", onMsg);
+      window.postMessage(
+        {
+          type: "YADA_PASSWORD_CREATE_VAULT",
+          requestId,
+          username,
+          secondFactor,
+          returnUrl: location.href,
+        },
+        "*"
+      );
+    });
+  }
+
+  function inceptVaultFromPage() {
+    const requestId = `i${++signinReqSeq}_${Date.now()}`;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        window.removeEventListener("message", onMsg);
+        reject(new Error("Broadcasting inception timed out. Try again."));
+      }, 60000);
+      function onMsg(event) {
+        if (event.source !== window) return;
+        const data = event.data;
+        if (!data || data.type !== "YADA_PASSWORD_INCEPT_RESULT") return;
+        if (data.requestId !== requestId) return;
+        clearTimeout(timer);
+        window.removeEventListener("message", onMsg);
+        if (!data.ok) reject(new Error(data.message || "Could not broadcast inception"));
+        else resolve(data);
+      }
+      window.addEventListener("message", onMsg);
+      window.postMessage(
+        { type: "YADA_PASSWORD_INCEPT", requestId, returnUrl: location.href },
+        "*"
+      );
+    });
+  }
+
+  if (extRefresh) extRefresh.addEventListener("click", () => void checkExtensionSetup());
+  if (installReload) installReload.addEventListener("click", () => location.reload());
+  if (vaultReload) vaultReload.addEventListener("click", () => location.reload());
+  if (vaultSeedDone) {
+    vaultSeedDone.addEventListener("click", () => {
+      if (vaultSeed) vaultSeed.hidden = true;
+      if (vaultForm) vaultForm.hidden = true;
+      if (vaultGuide) vaultGuide.hidden = true;
+      if (vaultIncept) vaultIncept.hidden = true;
+      void checkExtensionSetup();
+    });
+  }
+  if (vaultIncept) {
+    vaultIncept.addEventListener("click", async () => {
+      vaultIncept.disabled = true;
+      setVaultMsg("Broadcasting inception…", "busy");
+      try {
+        const result = await inceptVaultFromPage();
+        if (result.ok && result.inceptionDone) {
+          vaultIncept.hidden = true;
+          setVaultMsg("Inception broadcast. Continuing…", "ok");
+          await checkExtensionSetup();
+        } else {
+          setVaultMsg(
+            result.inceptionError
+              ? "Inception failed: " + result.inceptionError
+              : result.message || "Inception is still pending.",
+            "err"
+          );
+        }
+      } catch (err) {
+        setVaultMsg(String(err.message || err), "err");
+      } finally {
+        vaultIncept.disabled = false;
+      }
+    });
+  }
+  if (vaultForm) {
+    vaultForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const fields = new FormData(vaultForm);
+      const username = String(fields.get("vaultUsername") || "").trim().replace(/^@/, "");
+      const secondFactor = String(fields.get("vaultPassword") || "");
+      const confirm = String(fields.get("vaultPassword2") || "");
+      if (!username) {
+        setVaultMsg("Enter a username.", "err");
+        return;
+      }
+      if (secondFactor.length < 8) {
+        setVaultMsg("Use a master password of at least 8 characters.", "err");
+        return;
+      }
+      if (secondFactor !== confirm) {
+        setVaultMsg("The passwords do not match.", "err");
+        return;
+      }
+      const createBtn = document.getElementById("vault-create");
+      if (createBtn) createBtn.disabled = true;
+      setVaultMsg("Creating your vault…", "busy");
+      try {
+        const result = await createVaultFromPage(username, secondFactor);
+        const pending = !result.inceptionDone;
+        applyExtensionUsername(result.username || username);
+        if (vaultForm) vaultForm.hidden = true;
+        if (result.mnemonic) {
+          if (vaultSeedText) vaultSeedText.value = result.mnemonic;
+          if (vaultSeed) vaultSeed.hidden = false;
+          setVaultMsg("Vault created. Save your recovery phrase.", "");
+        }
+        if (vaultIncept) vaultIncept.hidden = !pending;
+        if (pending) {
+          setVaultMsg(
+            result.inceptionError
+              ? "Inception failed: " + result.inceptionError + " Press Broadcast inception to retry."
+              : "Inception is still pending. Press Broadcast inception to retry.",
+            "err"
+          );
+        } else if (!result.mnemonic) {
+          await checkExtensionSetup();
+        }
+      } catch (err) {
+        setVaultMsg(String(err.message || err), "err");
+      } finally {
+        if (createBtn) createBtn.disabled = false;
+      }
+    });
   }
 
   function currentUsername() {
@@ -4142,6 +4414,7 @@
       if (Date.now() - started > 180000) {
         throw new Error("timed out waiting for approval");
       }
+      void requestExtensionIdentity(800);
       await sleep(1500, signal);
       let view = null;
       if (remote) {
@@ -4254,6 +4527,12 @@
         throw new Error(created.message || "failed to create sign-in request");
       }
       const home = created.home_node ? " · " + created.home_node : "";
+      if (created.home_node) {
+        window.postMessage(
+          { type: "YADA_PASSWORD_USE_HOME", home: created.home_node },
+          "*"
+        );
+      }
       showSigninProgress(
         (created.delivered
           ? "Delivered to Yada Password"
