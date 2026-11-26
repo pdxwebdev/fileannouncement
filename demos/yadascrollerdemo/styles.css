@@ -1906,10 +1906,12 @@ a.pill {
 
 html.landing .media-tabs,
 html.landing #refresh,
-html.landing .hint,
-html.landing #nav-fyp,
-html.landing #nav-profile {
+html.landing .hint {
   display: none;
+}
+
+html.landing #nav-fyp {
+  visibility: hidden;
 }
 
 html.landing .top-actions {
@@ -1921,8 +1923,6 @@ html.landing #search {
 }
 
 html.landing .tabbar {
-  display: flex;
-  justify-content: center;
   background: transparent;
   border-top: 0;
 }

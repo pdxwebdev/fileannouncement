@@ -49,3 +49,5 @@ class TestYadaScrollerProfileNav(unittest.TestCase):
         css = self._read("styles.css")
         self.assertIn(".tabbar .tab-avatar", css)
         self.assertIn(".nav-avatar", css)
+        self.assertNotIn("html.landing #nav-profile", css)
+        self.assertIn("html.landing #nav-fyp", css)
