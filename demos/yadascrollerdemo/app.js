@@ -3876,17 +3876,17 @@
   railReport.addEventListener("click", () => openReport(activeItem()));
   async function ensurePostAllowed() {
     const id = clientIdentity();
-    if (!id) {
+    if (!id || !id.identity) {
       if (parseRoute().view !== "publish") location.hash = "#/publish";
       return false;
     }
     try {
       const res = await fetch(
-        "/crypto-onramp/usdc-balance?address=" + encodeURIComponent(id.address),
+        "/explorer-get-balance?address=" + encodeURIComponent(id.identity),
         { credentials: "same-origin" }
       );
       const data = await res.json().catch(() => ({}));
-      if (res.ok && data.ok && data.raw != null && BigInt(data.raw) > 0n) return true;
+      if (res.ok && Number(data.balance) > 0) return true;
     } catch (_) {}
     if ((location.hash || "") !== "#/fund") location.hash = "#/fund";
     return false;
