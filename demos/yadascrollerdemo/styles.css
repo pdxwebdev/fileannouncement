@@ -1753,13 +1753,14 @@ html.landing .site-menu-btn {
 .tabbar .tab-avatar {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-end;
+  padding-right: 6px;
 }
 
 .nav-avatar {
   display: block;
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   overflow: hidden;
   border: 2px solid transparent;
@@ -1773,8 +1774,8 @@ html.landing .site-menu-btn {
 }
 
 .nav-avatar .avatar-fallback svg {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
 }
 
 .tab-plus {
