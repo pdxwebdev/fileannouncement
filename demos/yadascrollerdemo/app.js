@@ -109,6 +109,8 @@
   const resyncBtn = document.getElementById("resync-btn");
   const signinBtn = document.getElementById("signin-btn");
   const signinUsername = document.getElementById("signin-username");
+  const signinCodeBox = document.getElementById("signin-code-box");
+  const signinCode = document.getElementById("signin-code");
   const playerEl = document.getElementById("player");
   const playerBack = document.getElementById("player-back");
   const playerVideo = document.getElementById("player-video");
@@ -1933,6 +1935,16 @@
     return (
       location.protocol === "http:" &&
       (host === "localhost" || host === "127.0.0.1" || host === "[::1]")
+    );
+  }
+
+  function isLoopbackPage() {
+    const host = (location.hostname || "").toLowerCase();
+    return (
+      host === "localhost" ||
+      host === "127.0.0.1" ||
+      host === "[::1]" ||
+      host === "::1"
     );
   }
 
@@ -4039,6 +4051,18 @@
     signinMsg.className = kind ? `signin-msg ${kind}` : "signin-msg";
   }
 
+  function showSigninCode(code) {
+    const value = String(code || "").trim();
+    if (!signinCodeBox || !signinCode || !value) return;
+    signinCode.textContent = value;
+    signinCodeBox.hidden = false;
+  }
+
+  function hideSigninCode() {
+    if (signinCodeBox) signinCodeBox.hidden = true;
+    if (signinCode) signinCode.textContent = "------";
+  }
+
   function setSigninLocked(locked) {
     const extOff = locked || !extReady;
     registerBtn.disabled = extOff;
@@ -4448,14 +4472,16 @@
     return "";
   }
 
-  async function fetchAuthView(sessionId, base, signal) {
+  async function fetchAuthView(sessionId, base, rpToken, signal) {
     const root = String(base || "").replace(/\/+$/, "");
     const url =
       root +
       "/password-rotation/auth-session/" +
       encodeURIComponent(sessionId);
+    const headers = { Accept: "application/json" };
+    if (rpToken) headers["X-Password-Auth-RP-Token"] = rpToken;
     const res = await fetch(url, {
-      headers: { Accept: "application/json" },
+      headers,
       credentials: root && root !== signinOrigin ? "omit" : "include",
       signal,
     });
@@ -4466,7 +4492,7 @@
     return data;
   }
 
-  async function waitForAuthApproval(sessionId, created, signal) {
+  async function waitForAuthApproval(sessionId, created, rpToken, signal) {
     const remote = authPollBase(created);
     const started = Date.now();
     while (!signal || !signal.aborted) {
@@ -4478,7 +4504,7 @@
       let view = null;
       if (remote) {
         try {
-          view = await fetchAuthView(sessionId, remote, signal);
+          view = await fetchAuthView(sessionId, remote, rpToken, signal);
         } catch (err) {
           if (err && err.name === "AbortError") throw err;
           view = null;
@@ -4486,7 +4512,7 @@
       }
       let localView = null;
       try {
-        localView = await fetchAuthView(sessionId, "", signal);
+        localView = await fetchAuthView(sessionId, "", rpToken, signal);
       } catch (err) {
         if (err && err.name === "AbortError") throw err;
       }
@@ -4586,10 +4612,29 @@
       if (!createRes.ok || !created.status || !created.session_id) {
         throw new Error(created.message || "failed to create sign-in request");
       }
-      const home = created.home_node ? " · " + created.home_node : "";
-      if (created.home_node) {
+      const sessionId = created.session_id;
+      const rpToken = created.rp_token || "";
+      showSigninCode(created.verification_code);
+      // The extension only approves a request the active tab started, and the
+      // RP poll requires this read token.
+      try {
+        sessionStorage.setItem(
+          "yadaActiveAuthSession",
+          JSON.stringify({
+            session_id: sessionId,
+            origin: signinOrigin,
+            at: Date.now(),
+            rp_token: rpToken,
+          })
+        );
+      } catch (_) {}
+      const homeNode = isLoopbackPage()
+        ? signinOrigin
+        : created.home_node || "";
+      const home = homeNode ? " · " + homeNode : "";
+      if (homeNode) {
         window.postMessage(
-          { type: "YADA_PASSWORD_USE_HOME", home: created.home_node },
+          { type: "YADA_PASSWORD_USE_HOME", home: homeNode },
           "*"
         );
       }
@@ -4601,7 +4646,7 @@
           home
       );
       if (signinTutorial) signinTutorial.hidden = false;
-      const view = await waitForAuthApproval(created.session_id, created, signal);
+      const view = await waitForAuthApproval(sessionId, created, rpToken, signal);
       if (!view.ok || !/^0x[0-9a-fA-F]{40}$/.test(view.baseAddress || "")) {
         throw new Error(view.message || "sign-in was not approved");
       }
@@ -4626,6 +4671,10 @@
     } finally {
       signinAbort = null;
       signinBtn.textContent = SIGNIN_LABEL;
+      hideSigninCode();
+      try {
+        sessionStorage.removeItem("yadaActiveAuthSession");
+      } catch (_) {}
       if (signinTutorial) signinTutorial.hidden = true;
     }
   });
