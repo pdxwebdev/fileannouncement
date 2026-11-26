@@ -169,6 +169,7 @@
   const navFyp = document.getElementById("nav-fyp");
   const navUpload = document.getElementById("nav-upload");
   const navProfile = document.getElementById("nav-profile");
+  const navProfileAvatar = document.getElementById("nav-profile-avatar");
 
   /** @type {Array<object>} */
   let videos = [];
@@ -2122,6 +2123,7 @@
       }
       photosLoadedQuery = null;
       loadedPin = null;
+      void refreshNavProfile();
     } catch (err) {
       stopComposePoll();
       hideComposeProgress();
@@ -3551,6 +3553,13 @@
     return itemType(item) === PROFILE_PHOTO_TYPE;
   }
 
+  function profileAvatarSrc(profile) {
+    const avatar = ((profile && profile.photos) || []).find(
+      (item) => isProfilePhoto(item) && photoSrc(item)
+    );
+    return avatar ? photoSrc(avatar) : "";
+  }
+
   function splitProfileMedia(profile) {
     const photosOut = [];
     const videosOut = [];
@@ -3638,10 +3647,12 @@
       profilePresence.hidden = true;
       profilePresence.classList.remove("is-online");
     }
-    const circle = ((profile && profile.photos) || []).find(
-      (item) => isProfilePhoto(item) && photoSrc(item)
+    paintAvatar(
+      profileAvatar,
+      profile && profile.username,
+      profileAvatarSrc(profile)
     );
-    paintAvatar(profileAvatar, profile && profile.username, circle ? photoSrc(circle) : "");
+    if (profile && profile.is_me) paintNavAvatar(profile, profile.username);
     applyProfileLive(profile);
     if (profile && profile.username) {
       profileSub.hidden = true;
@@ -3923,19 +3934,66 @@
   });
   let ownNavBusy = false;
 
+  function paintNavAvatar(profile, fallbackName) {
+    if (!navProfileAvatar) return;
+    const username = String((profile && profile.username) || fallbackName || "")
+      .trim()
+      .replace(/^@/, "");
+    const src = profileAvatarSrc(profile);
+    navProfileAvatar.innerHTML = "";
+    navProfileAvatar.style.background = "#2a2a2a";
+    if (src) {
+      const img = document.createElement("img");
+      img.className = "avatar-photo";
+      img.alt = "";
+      img.addEventListener("error", () => {
+        navProfileAvatar.innerHTML = avatarMarkup("");
+      });
+      img.src = src;
+      navProfileAvatar.appendChild(img);
+    } else {
+      navProfileAvatar.innerHTML = avatarMarkup("");
+    }
+    if (navProfile) {
+      navProfile.setAttribute(
+        "aria-label",
+        username ? `Open @${username} profile` : "Profile or sign in"
+      );
+    }
+  }
+
+  async function fetchOwnAccount() {
+    try {
+      const res = await fetch(API_ME, { credentials: "same-origin" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data || data.authenticated !== true) return null;
+      const profile = data.profile || null;
+      const username = String(data.username || (profile && profile.username) || "")
+        .trim()
+        .replace(/^@/, "");
+      if (!username) return null;
+      return { username, profile };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async function refreshNavProfile() {
+    const account = await fetchOwnAccount();
+    paintNavAvatar(
+      account && account.profile,
+      account && account.username
+    );
+  }
+
   async function openOwnProfile() {
     if (ownNavBusy) return;
     ownNavBusy = true;
     try {
-      const res = await fetch(API_ME, { credentials: "same-origin" });
-      const data = await res.json().catch(() => ({}));
-      const name = String(
-        (data && (data.username || (data.profile && data.profile.username))) || ""
-      )
-        .trim()
-        .replace(/^@/, "");
-      if (res.ok && data.authenticated === true && name) {
-        const hash = `#/@${encodeURIComponent(name)}`;
+      const account = await fetchOwnAccount();
+      if (account && account.username) {
+        paintNavAvatar(account.profile, account.username);
+        const hash = `#/@${encodeURIComponent(account.username)}`;
         if ((location.hash || "") === hash) {
           closePlayer();
           syncRoute();
@@ -4557,6 +4615,7 @@
       stopSigninProgress();
       setSigninMsg(signedIn ? "Signed in as @" + signedIn : "Signed in", "ok");
       if (signinUsername && signedIn) signinUsername.value = signedIn;
+      void refreshNavProfile();
       goPost("");
     } catch (err) {
       const aborted =
@@ -4571,6 +4630,8 @@
     }
   });
   syncExtensionUsername();
+  paintNavAvatar(null);
+  void refreshNavProfile();
 
   navUpload.addEventListener("click", () => {
     goPost("");

@@ -1750,6 +1750,33 @@ html.landing .site-menu-btn {
   color: #fff;
 }
 
+.tabbar .tab-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.nav-avatar {
+  display: block;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 2px solid transparent;
+  background: #2a2a2a;
+  color: #fff;
+}
+
+.tabbar .tab-avatar.active .nav-avatar,
+.tabbar .tab-avatar[aria-current="page"] .nav-avatar {
+  border-color: #fff;
+}
+
+.nav-avatar .avatar-fallback svg {
+  width: 18px;
+  height: 18px;
+}
+
 .tab-plus {
   width: 64px;
 }
