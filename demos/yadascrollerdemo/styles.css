@@ -879,6 +879,55 @@ html.landing .site-menu-btn {
   cursor: pointer;
 }
 
+.pill.cta,
+a.pill.cta {
+  border: 0;
+  border-radius: 999px;
+  background-image: linear-gradient(135deg, #fe2c55 0%, #ff5c8a 45%, #ff8a00 100%);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  padding: 13px 22px;
+  text-align: center;
+  box-shadow: 0 8px 22px rgba(254, 44, 85, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.12) inset;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
+}
+
+.pill.cta:hover,
+a.pill.cta:hover {
+  filter: brightness(1.07);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 26px rgba(254, 44, 85, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.18) inset;
+}
+
+.pill.cta:active,
+a.pill.cta:active {
+  transform: translateY(0) scale(0.98);
+}
+
+.pill.cta:focus-visible,
+a.pill.cta:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.pill.cta:disabled {
+  box-shadow: none;
+}
+
+.pill.cta--coin,
+a.pill.cta--coin {
+  background-image: linear-gradient(135deg, #ffd84d 0%, #ffb300 55%, #ff8f00 100%);
+  color: #1a1200;
+  box-shadow: 0 8px 22px rgba(255, 179, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.3) inset;
+}
+
+.pill.cta--coin:hover,
+a.pill.cta--coin:hover {
+  box-shadow: 0 10px 26px rgba(255, 179, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.38) inset;
+}
+
 .profile-tabs {
   display: flex;
   gap: 8px;
@@ -1110,7 +1159,8 @@ html.landing .site-menu-btn {
 }
 
 .compose-signin {
-  align-self: flex-start;
+  align-self: stretch;
+  width: 100%;
 }
 
 .compose-progress .progress-label {
@@ -1170,6 +1220,12 @@ html.landing .site-menu-btn {
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 16px;
+}
+
+.signin-actions .pill.cta {
+  flex: 1 0 100%;
+  padding: 14px;
+  font-size: 16px;
 }
 
 .signin-actions .pill:disabled {
