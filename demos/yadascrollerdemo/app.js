@@ -4593,7 +4593,21 @@
     if (signinTutorial) signinTutorial.hidden = true;
     startSigninProgress("Creating sign-in request…");
     signinBtn.textContent = "Cancel";
+    let homeAnnounce = null;
+    const announceHome = (home) => {
+      if (!home) return;
+      window.postMessage(
+        { type: "YADA_PASSWORD_USE_HOME", home, username },
+        "*"
+      );
+    };
     try {
+      // A loopback page is served by this node, so the extension can connect
+      // before the session exists and receive the push immediately.
+      if (isLoopbackPage()) {
+        announceHome(signinOrigin);
+        await new Promise((resolve) => setTimeout(resolve, 700));
+      }
       const createRes = await fetch("/password-rotation/auth-session", {
         method: "POST",
         headers: {
@@ -4632,12 +4646,10 @@
         ? signinOrigin
         : created.home_node || "";
       const home = homeNode ? " · " + homeNode : "";
-      if (homeNode) {
-        window.postMessage(
-          { type: "YADA_PASSWORD_USE_HOME", home: homeNode },
-          "*"
-        );
-      }
+      announceHome(homeNode);
+      // Re-announce while waiting so a reconnected extension still drains
+      // this pending request.
+      homeAnnounce = setInterval(() => announceHome(homeNode), 5000);
       showSigninProgress(
         (created.delivered
           ? "Delivered to Yada Password"
@@ -4669,6 +4681,7 @@
       stopSigninProgress();
       setSigninMsg(aborted ? "Cancelled" : String(err.message || err), "err");
     } finally {
+      if (homeAnnounce) clearInterval(homeAnnounce);
       signinAbort = null;
       signinBtn.textContent = SIGNIN_LABEL;
       hideSigninCode();
